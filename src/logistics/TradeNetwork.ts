@@ -50,7 +50,7 @@ const TraderStatsDefaults: TraderStats = {
 // Maximum prices I'm willing to pay to buy various resources - based on shard2 market data in June 2018
 // (might not always be up to date)
 export const maxMarketPrices: { [resourceType: string]: number } = {
-	default             : 5.0,
+	default             : 2.0,
 	[RESOURCE_HYDROGEN] : 0.3,
 	[RESOURCE_OXYGEN]   : 0.25,
 	[RESOURCE_UTRIUM]   : 0.3,
@@ -319,7 +319,8 @@ export class TraderJoe implements ITradeNetwork {
 
 			const ordersOfType = _.filter(Game.market.orders, o => o.type == ORDER_BUY && o.resourceType == resource);
 			if (ordersOfType.length < maxOrdersOfType) {
-				const ret = Game.market.createOrder(ORDER_BUY, resource, marketHigh, amount, terminal.room.name);
+				const ret = Game.market.createOrder({type:ORDER_BUY,resourceType: resource,price: marketHigh, 
+						totalAmount: amount, roomName: terminal.room.name});
 				this.notify(`${terminal.room.print}: creating buy order for ${resource} at price ${marketHigh}. ` +
 							`Response: ${ret}`);
 			}
@@ -351,7 +352,7 @@ export class TraderJoe implements ITradeNetwork {
 				this.notify(`${terminal.room.print}: updating sell order price for ${resource} from ` +
 							`${order.price} to ${marketLow}. Response: ${ret}`);
 			}
-			if (order.remainingAmount < 2000) {
+			if (order.remainingAmount < 2000 && amount > order.remainingAmount) {
 				const addAmount = (amount - order.remainingAmount);
 				const ret = Game.market.extendOrder(order.id, addAmount);
 				this.notify(`${terminal.room.print}: extending sell order for ${resource} by ${addAmount}.` +
@@ -362,7 +363,8 @@ export class TraderJoe implements ITradeNetwork {
 
 			const ordersOfType = _.filter(Game.market.orders, o => o.type == ORDER_SELL && o.resourceType == resource);
 			if (ordersOfType.length < maxOrdersOfType) {
-				const ret = Game.market.createOrder(ORDER_SELL, resource, marketLow, amount, terminal.room.name);
+				const ret = Game.market.createOrder({type:ORDER_SELL,resourceType: resource, 
+					price:marketLow,totalAmount: amount,roomName: terminal.room.name});
 				this.notify(`${terminal.room.print}: creating sell order for ${resource} at price ${marketLow}. ` +
 							`Response: ${ret}`);
 			}

@@ -1,3 +1,4 @@
+import { log } from 'console/log';
 import {isStoreStructure} from '../../declarations/typeGuards';
 import {HaulingOverlord} from '../../overlords/situational/hauler';
 import {profile} from '../../profiler/decorator';
@@ -51,11 +52,15 @@ export class DirectiveHaul extends Directive {
 		return _.keys(this.drops).length > 0;
 	}
 
-	get storeStructure(): StructureStorage | StructureTerminal | StructureNuker | undefined {
+	get storeStructure(): StructureStorage | StructureContainer |
+						 StructureTerminal | StructureNuker | undefined {
 		if (this.pos.isVisible) {
 			return <StructureStorage>this.pos.lookForStructure(STRUCTURE_STORAGE) ||
+				   <StructureContainer>this.pos.lookForStructure(STRUCTURE_CONTAINER) ||
 				   <StructureTerminal>this.pos.lookForStructure(STRUCTURE_TERMINAL) ||
 				   <StructureNuker>this.pos.lookForStructure(STRUCTURE_NUKER);
+				   // || <Ruin>this.pos.lookFor(LOOK_RUINS).filter(ruin => 
+				   // ruin.structure.structureType == STRUCTURE_INVADER_CORE)[0];
 		}
 		return undefined;
 	}
@@ -65,12 +70,10 @@ export class DirectiveHaul extends Directive {
 			// Merge the "storage" of drops with the store of structure
 			let store: { [resourceType: string]: number } = {};
 			if (this.storeStructure) {
-				if (isStoreStructure(this.storeStructure)) {
-					store = this.storeStructure.store;
-				} else {
-					store = {energy: this.storeStructure.energy};
-				}
+				// log.info(`Found store structure ${this.storeStructure.id}`);
+				store = this.storeStructure.store;
 			} else {
+				// log.info(`No store structure`);
 				store = {energy: 0};
 			}
 			// Merge with drops

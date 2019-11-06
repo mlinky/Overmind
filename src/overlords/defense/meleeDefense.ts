@@ -25,7 +25,8 @@ export class MeleeDefenseOverlord extends CombatOverlord {
 	constructor(directive: DirectiveInvasionDefense, boosted = false, priority = OverlordPriority.defense.meleeDefense) {
 		super(directive, 'meleeDefense', priority, 1);
 		this.zerglings = this.combatZerg(Roles.melee, {
-			boostWishlist: boosted ? [boostResources.tough[3], boostResources.attack[3], boostResources.move[3]]
+			boostWishlist: boosted ? [boostResources.tough[3], boostResources.attack[3], 
+			boostResources.move[3], boostResources.heal[3]]
 								   : undefined
 		});
 	}

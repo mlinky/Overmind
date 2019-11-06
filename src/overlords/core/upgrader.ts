@@ -85,6 +85,7 @@ export class UpgradingOverlord extends Overlord {
 		}
 	}
 
+	
 	run() {
 		this.autoRun(this.upgraders, upgrader => this.handleUpgrader(upgrader));
 	}

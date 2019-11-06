@@ -97,7 +97,7 @@ export class SwarmDestroyerOverlord extends SwarmOverlord {
 		// Swarm initially groups up at fallback location
 		if (!swarm.memory.initialAssembly) {
 			const assemblyPoint = this.assemblyPoints[index] || this.fallback;
-			log.debug(`Assmbling at ${assemblyPoint.print}`);
+			log.debug(`Assembling at ${assemblyPoint.print}`);
 			swarm.memory.initialAssembly = swarm.assemble(assemblyPoint);
 			return;
 		}

@@ -6,7 +6,7 @@ import {Tasks} from '../../tasks/Tasks';
 import {Zerg} from '../../zerg/Zerg';
 import {Overlord} from '../Overlord';
 
-const DEFAULT_NUM_SCOUTS = 3;
+const DEFAULT_NUM_SCOUTS = 1;
 
 /**
  * Sends out scouts which randomly traverse rooms to uncover possible expansion locations and gather intel

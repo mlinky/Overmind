@@ -2,6 +2,7 @@ import {log} from '../console/log';
 import {CombatIntel} from '../intel/CombatIntel';
 import {Pathing} from '../movement/Pathing';
 import {AttackStructurePriorities, AttackStructureScores} from '../priorities/priorities_structures';
+import {HostileStructurePriorities} from '../priorities/priorities_structures';
 import {profile} from '../profiler/decorator';
 import {maxBy} from '../utilities/utils';
 import {Visualizer} from '../visuals/Visualizer';
@@ -114,6 +115,19 @@ export class CombatTargeting {
 				return healScore + CombatIntel.getHealAmount(healer.creep);
 			}
 		});
+	}
+
+	static findClosestHostileStructure(zerg: Zerg, checkReachable = false): Structure | undefined {
+		for (const structureType of HostileStructurePriorities) {
+			const structures = _.filter(zerg.room.hostileStructures, s => s.structureType == structureType);
+			if (structures.length == 0) continue;
+			if (checkReachable) {
+				const closestReachable = this.findClosestReachable(zerg.pos, structures) as Structure | undefined;
+				if (closestReachable) return closestReachable;
+			} else {
+				return zerg.pos.findClosestByRange(structures) as Structure | undefined;
+			}
+		}
 	}
 
 	static findClosestPrioritizedStructure(zerg: Zerg, checkReachable = false): Structure | undefined {

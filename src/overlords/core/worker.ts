@@ -1,5 +1,6 @@
 import {$} from '../../caching/GlobalCache';
 import {Colony, ColonyStage, DEFCON} from '../../Colony';
+import {log} from '../../console/log';
 import {Roles, Setups} from '../../creepSetups/setups';
 import {TERMINAL_STATE_REBUILD} from '../../directives/terminalState/terminalState_rebuild';
 import {OverlordPriority} from '../../priorities/priorities_overlords';
@@ -40,9 +41,10 @@ export class WorkerOverlord extends Overlord {
 			5       : 1e+5,
 			6       : 5e+5,
 			7       : 1e+6,
-			8       : 2e+7,
+			8       : 5e+7,
 		},
 		hitTolerance        : 100000, 	// allowable spread in HP
+		extraWorkerThreshold: 300000,	// add extra worker to the pool if we have more energy around
 		fortifyDutyThreshold: 500000,	// ignore fortify duties until this amount of energy is present in the room
 	};
 
@@ -183,15 +185,21 @@ export class WorkerOverlord extends Overlord {
 					const paveTicks = _.sum(this.colony.rooms,
 										  room => this.colony.roadLogistics.energyToRepave(room)) / 1; // repairCost=1
 					let fortifyTicks = 0;
+					let extraWorker = 0;
 					if (this.colony.assets.energy > WorkerOverlord.settings.fortifyDutyThreshold) {
 						fortifyTicks = 0.25 * _.sum(this.fortifyBarriers, barrier =>
 							Math.max(0, WorkerOverlord.settings.barrierHits[this.colony.level]
 										- barrier.hits)) / REPAIR_POWER;
+						fortifyTicks = Math.min(fortifyTicks,this.colony.assets.energy-WorkerOverlord.settings.fortifyDutyThreshold);
+
+					} else if (this.colony.assets.energy > WorkerOverlord.settings.extraWorkerThreshold && Game.cpu.bucket>5000) {
+						// Add a cheeky worker to move things along
+						extraWorker=1;
 					}
 					// max constructionTicks for private server manually setting progress
 					let numWorkers = Math.ceil(2 * (5 * buildTicks + repairTicks + paveTicks + fortifyTicks) /
 											   (workPartsPerWorker * CREEP_LIFE_TIME));
-					numWorkers = Math.min(numWorkers, MAX_WORKERS);
+					numWorkers = Math.min(numWorkers + extraWorker, MAX_WORKERS);
 					if (this.colony.controller.ticksToDowngrade <= (this.colony.level >= 4 ? 10000 : 2000)) {
 						numWorkers = Math.max(numWorkers, 1);
 					}

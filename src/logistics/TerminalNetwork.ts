@@ -4,7 +4,7 @@ import {Colony, getAllColonies} from '../Colony';
 import {log} from '../console/log';
 import {Mem} from '../memory/Memory';
 import {profile} from '../profiler/decorator';
-import {Abathur} from '../resources/Abathur';
+import {Abathur, justSellStock} from '../resources/Abathur';
 import {RESOURCE_IMPORTANCE} from '../resources/map_resources';
 import {alignedNewline, bullet, rightArrow} from '../utilities/stringConstants';
 import {maxBy, mergeSum, minBy, minMax} from '../utilities/utils';
@@ -273,7 +273,14 @@ export class TerminalNetwork implements ITerminalNetwork {
 
 			} else {
 
-				if (terminal.store[<ResourceConstant>resource]! > threshold) {
+				if (justSellStock.includes(<ResourceConstant>resource)) {
+
+					const response = Overmind.tradeNetwork.sell(terminal, <ResourceConstant>resource, 
+						terminal.store[<ResourceConstant>resource]);
+					if (response == OK) return;
+
+
+				} else if (terminal.store[<ResourceConstant>resource]! > threshold) {
 					const receiver = maxBy(this.terminals,
 										   terminal => wantedAmount(colonyOf(terminal),
 																	<ResourceConstant>resource));
@@ -291,8 +298,7 @@ export class TerminalNetwork implements ITerminalNetwork {
 							if (response == OK) return;
 						}
 					}
-				}
-
+				} 
 			}
 		}
 	}

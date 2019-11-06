@@ -229,6 +229,7 @@ export class Movement {
 		// check if creep is stuck
 		if (this.isStuck(creep, state)) {
 			state.stuckCount++;
+			creep.stuckTotal++;
 			this.circle(creep.pos, 'magenta', state.stuckCount * .3);
 			// pushedCreep = this.pushCreep(creep);
 		} else {
@@ -239,7 +240,8 @@ export class Movement {
 		if (!options.stuckValue) {
 			options.stuckValue = DEFAULT_STUCK_VALUE;
 		}
-		if (state.stuckCount >= options.stuckValue && Math.random() > .5) {
+		if (creep.stuckTotal > 3 || (state.stuckCount >= options.stuckValue && Math.random() > .5)) {
+			creep.stuckTotal = 0;
 			options.ignoreCreeps = false;
 			delete moveData.path;
 		}
@@ -286,8 +288,13 @@ export class Movement {
 			const cpuUsed = Game.cpu.getUsed() - cpu;
 			state.cpu = _.round(cpuUsed + state.cpu);
 			if (Game.time % 10 == 0 && state.cpu > REPORT_CPU_THRESHOLD) {
-				log.alert(`Movement: heavy cpu use: ${creep.name}, cpu: ${state.cpu}. ` +
-						  `(${creep.pos.print} ${rightArrow} ${destination.print})`);
+				log.alert(`Movement: heavy cpu use: ${creep.name}, cpu: ${state.cpu}, stuckCount ${state.stuckCount}
+				, stuckTotal ${creep.stuckTotal}, roleName ${creep.roleName}. ` 
+				+ `(${creep.pos.print} ${rightArrow} ${destination.print})`);
+				if (creep.roleName === 'scout') {
+					log.alert(`Creep ${creep.name} using too much CPU - terminating`);
+					creep.suicide();
+				}
 			}
 			let color = 'orange';
 			if (ret.incomplete) {
@@ -1249,11 +1256,11 @@ export class Movement {
 	private static serializeState(creep: Zerg, destination: RoomPosition, state: MoveState, moveData: MoveData,
 								  nextCoord?: Coord | RoomPosition | undefined) {
 		if (nextCoord) {
-			moveData.state = [creep.pos.x, creep.pos.y, state.stuckCount, state.cpu, destination.x, destination.y,
-							  destination.roomName, nextCoord.x, nextCoord.y];
+			moveData.state = [creep.pos.x, creep.pos.y, state.stuckCount, state.cpu, destination.x, 
+							destination.y, destination.roomName, nextCoord.x, nextCoord.y];
 		} else {
-			moveData.state = [creep.pos.x, creep.pos.y, state.stuckCount, state.cpu, destination.x, destination.y,
-							  destination.roomName];
+			moveData.state = [creep.pos.x, creep.pos.y, state.stuckCount, state.cpu, destination.x,
+							 destination.y, destination.roomName];
 		}
 	}
 

@@ -94,6 +94,7 @@ export class Zerg {
 	fatigue: number;					// |
 	hits: number;						// |
 	hitsMax: number;					// |
+	stuckTotal: number = 0;					// |
 	id: string;							// |
 	memory: CreepMemory;				// | See the ICreepMemory interface for structure
 	name: string;						// |

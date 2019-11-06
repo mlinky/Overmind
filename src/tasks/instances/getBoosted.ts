@@ -6,7 +6,7 @@ import {Task} from '../Task';
 export type getBoostedTargetType = StructureLab;
 export const getBoostedTaskName = 'getBoosted';
 
-export const MIN_LIFETIME_FOR_BOOST = 0.85;
+export const MIN_LIFETIME_FOR_BOOST = 0.95;
 
 @profile
 export class TaskGetBoosted extends Task {

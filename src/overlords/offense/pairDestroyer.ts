@@ -1,3 +1,4 @@
+import { log } from 'console/log';
 import {CombatSetups, Roles} from '../../creepSetups/setups';
 import {DirectivePairDestroy} from '../../directives/offense/pairDestroy';
 import {DirectiveTargetSiege} from '../../directives/targeting/siegeTarget';
@@ -48,10 +49,13 @@ export class PairDestroyerOverlord extends Overlord {
 			if (targetedStructures.length > 0) {
 				return CombatTargeting.findClosestReachable(attacker.pos, targetedStructures);
 			} else {
+				// Target nearby structures
+				const hostileStructure = CombatTargeting.findClosestHostileStructure(attacker);
+				if (hostileStructure) return hostileStructure;
 				// Target nearby hostile creeps
 				const creepTarget = CombatTargeting.findClosestHostile(attacker, true);
 				if (creepTarget) return creepTarget;
-				// Target nearby hostile structures
+				// Target nearby structures
 				const structureTarget = CombatTargeting.findClosestPrioritizedStructure(attacker);
 				if (structureTarget) return structureTarget;
 			}

@@ -1,3 +1,4 @@
+import { log } from 'console/log';
 import {AttackStructurePriorities} from '../../priorities/priorities_structures';
 import {profile} from '../../profiler/decorator';
 import {Visualizer} from '../../visuals/Visualizer';
@@ -23,6 +24,7 @@ export class DirectiveTargetSiege extends Directive {
 
 	getTarget(): Structure | undefined {
 		const targetedStructures = this.pos.lookFor(LOOK_STRUCTURES) as Structure[];
+		log.info(`Getting target`);
 		for (const structure of targetedStructures) {
 			for (const structureType of AttackStructurePriorities) {
 				if (structure.structureType == structureType) {

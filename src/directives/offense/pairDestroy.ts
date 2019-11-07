@@ -28,7 +28,7 @@ export class DirectivePairDestroy extends Directive {
 	}
 
 	init(): void {
-		this.alert(`Pair detroyer directive active`);
+		this.alert(`Pair destroyer directive active`);
 	}
 
 	run(): void {

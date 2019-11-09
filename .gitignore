@@ -1,11 +1,13 @@
 # Screeps Config
 screeps.json
 
-# Ignore basic folders
+# Ignore basic folders 
 /dist
 /node_modules
 /typings
 /.rpt2_cache
+/.vscode
+/.github
 /tsc-out
 
 # Ignore Mathematica notebooks so they don't add 50 billion lines to contribution count

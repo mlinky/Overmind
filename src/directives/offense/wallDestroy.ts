@@ -23,7 +23,7 @@ export class DirectiveWallDestroy extends Directive {
 	}
 
 	init(): void {
-		this.alert(`Destroying wall in ${this.room!.name}`);
+		this.alert(`Destroying wall in ${this.pos.roomName}`);
 	}
 
 	getTarget(): Structure | undefined {

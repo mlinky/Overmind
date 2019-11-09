@@ -9,6 +9,7 @@ export type withdrawTargetType =
 	| StoreStructure
 	| StructureLab
 	| StructurePowerSpawn
+	| Ruin
 	| Tombstone;
 
 export const withdrawTaskName = 'withdraw';

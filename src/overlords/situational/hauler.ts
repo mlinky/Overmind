@@ -77,6 +77,14 @@ export class HaulingOverlord extends Overlord {
 							return;
 						}
 					}
+				} else if (this.directive.ruinStoreStructure) {
+					let store: { [resourceType: string]: number } = this.directive.ruinStoreStructure.store;
+					for (const resourceType in store) {
+						if (store[resourceType] > 0) {
+							hauler.task = Tasks.withdraw(this.directive.ruinStoreStructure, <ResourceConstant>resourceType);
+							return;
+						}
+					}
 				}
 				// Shouldn't reach here
 				log.warning(`${hauler.name} in ${hauler.room.print}: nothing to collect!`);

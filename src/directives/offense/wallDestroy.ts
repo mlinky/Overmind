@@ -1,7 +1,7 @@
+import { WallDestroyOverlord } from 'overlords/offense/wallDestroyer';
+import { Visualizer } from 'visuals/Visualizer';
 import {log} from '../../console/log';
-import {SwarmDestroyerOverlord} from '../../overlords/offense/swarmDestroyer';
 import {profile} from '../../profiler/decorator';
-import {Visualizer} from '../../visuals/Visualizer';
 import {Directive} from '../Directive';
 
 /**
@@ -12,26 +12,40 @@ export class DirectiveWallDestroy extends Directive {
 
 	static directiveName = 'wallDestroy';
 	static color = COLOR_RED;
-	static secondaryColor = COLOR_PURPLE;
+	static secondaryColor = COLOR_GREY;
 
 	constructor(flag: Flag) {
 		super(flag);
 	}
 
 	spawnMoarOverlords() {
-// 		this.overlords.scout = new StationaryScoutOverlord(this); // TODO: Not have a scout at all times
-// 		this.overlords.controllerAttack = new ControllerAttackerOverlord(this);
+ 		this.overlords.wallDestroy = new WallDestroyOverlord(this);
 	}
 
 	init(): void {
-		const level: string = this.room && this.room.controller ? this.room.controller.level.toString() : '???';
 		this.alert(`Destroying wall in ${this.room!.name}`);
 	}
 
-	run(): void {
-		if (this.room && this.room.controller && this.room.controller.level == 0) {
-			log.notify(`Removing ${this.name} since controller has reached level 0.`);
-			this.remove();
+	getTarget(): Structure | undefined {
+		const targetedStructures = this.pos.lookFor(LOOK_STRUCTURES) as Structure[];
+		for (const structure of targetedStructures) {
+			if (structure.structureType == STRUCTURE_WALL) {
+				return structure;
+			}
 		}
+	}
+
+	run(): void {
+		if (this.pos.isVisible) {
+			const target = this.getTarget();
+			if (!target) {
+				log.info(`Removing wall destroy directive`);
+				this.remove();
+			}
+		}
+	}
+
+	visuals(): void {
+		Visualizer.marker(this.pos, {color: 'yellow'});
 	}
 }

@@ -22,6 +22,7 @@ export let OverlordPriority = {
 		destroy         : 300,
 		healPoint       : 301,
 		siege           : 302,
+		wallDestroy     : 398,
 		controllerAttack: 399
 	},
 

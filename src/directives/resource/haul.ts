@@ -65,6 +65,13 @@ export class DirectiveHaul extends Directive {
 		return undefined;
 	}
 
+	get ruinStoreStructure(): Ruin | undefined {
+		if (this.pos.isVisible) {
+			return <Ruin>this.pos.lookFor(LOOK_RUINS)[0];
+		}
+		return undefined;
+	}
+
 	get store(): StoreDefinition {
 		if (!this._store) {
 			// Merge the "storage" of drops with the store of structure
@@ -72,6 +79,8 @@ export class DirectiveHaul extends Directive {
 			if (this.storeStructure) {
 				// log.info(`Found store structure ${this.storeStructure.id}`);
 				store = this.storeStructure.store;
+			} else if (this.ruinStoreStructure) {
+				store = this.ruinStoreStructure.store;
 			} else {
 				// log.info(`No store structure`);
 				store = {energy: 0};

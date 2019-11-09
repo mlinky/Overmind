@@ -22,11 +22,11 @@ export class WallDestroyOverlord extends Overlord {
 	constructor(directive: DirectiveWallDestroy, priority = OverlordPriority.offense.wallDestroy) {
 		super(directive, 'wallDestroy', priority);
 		this.directive = directive;
-		this.wallDestroyers = this.zerg(Roles.melee);
+		this.wallDestroyers = this.zerg(Roles.dismantler);
 	}
 
 	init() {
-		this.wishlist(1, CombatSetups.zerglings.default);
+		this.wishlist(2, CombatSetups.dismantlers.default);
 	}
 
 	private handleWallDestroyer(wallDestroyer: Zerg): void {
@@ -34,7 +34,7 @@ export class WallDestroyOverlord extends Overlord {
 			const target = this.directive.getTarget();
 
 			if (target) {
-				wallDestroyer.task = Tasks.attack(target);
+				wallDestroyer.task = Tasks.dismantle(target);
 			}
 
 		} else {

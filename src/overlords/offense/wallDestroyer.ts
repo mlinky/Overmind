@@ -29,11 +29,7 @@ export class WallDestroyOverlord extends Overlord {
 	}
 
 	init() {
-		const count = this.colony.getZergByRole(Roles.dismantler).length;
-		// log.info(`${this.directive.pos.roomName} - ${Roles.dismantler} count ${count}`);
-		if (count < 3) {
-			this.wishlist(1, this.setup);
-		}
+		this.wishlist(1, this.setup);
 	}
 
 	private handleWallDestroyer(wallDestroyer: Zerg): void {

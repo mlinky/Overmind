@@ -5,6 +5,7 @@ import {DirectiveColonize} from './colony/colonize';
 import {DirectiveIncubate} from './colony/incubate';
 import {DirectiveOutpost} from './colony/outpost';
 import {DirectiveSKOutpost} from './colony/outpostSK';
+import { DirectiveWallMine } from './colony/wallMine';
 import {DirectiveGuard} from './defense/guard';
 import {DirectiveInvasionDefense} from './defense/invasionDefense';
 import {DirectiveOutpostDefense} from './defense/outpostDefense';
@@ -47,7 +48,9 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 					return new DirectiveColonize(flag);
 				case COLOR_ORANGE:
 					return new DirectiveClearRoom(flag);
-			}
+				case COLOR_BLUE:
+					return new DirectiveWallMine(flag);
+				}
 			break;
 
 		// Offensive combat directives =================================================================================
@@ -59,7 +62,7 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 					return new DirectivePairDestroy(flag);
 				case COLOR_PURPLE:
 					return new DirectiveControllerAttack(flag);
-				case COLOR_GREY:
+				case COLOR_BLUE:
 					return new DirectiveWallDestroy(flag);			}
 			break;
 

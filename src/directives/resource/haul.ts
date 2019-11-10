@@ -1,4 +1,5 @@
 import { log } from 'console/log';
+import { Roles } from 'creepSetups/setups';
 import {isStoreStructure} from '../../declarations/typeGuards';
 import {HaulingOverlord} from '../../overlords/situational/hauler';
 import {profile} from '../../profiler/decorator';
@@ -119,9 +120,17 @@ export class DirectiveHaul extends Directive {
 
 	run(): void {
 		if (this.totalResources == 0) {
+			const zergs = this.colony.getZergByRole(Roles.transport);
+			if (zergs) {
+				for (const zerg of zergs) {
+					if (zerg && zerg.memory[_MEM.OVERLORD]==`${this.name}>haul`) {
+						log.info(`${zerg.pos.roomName} - reassigning ${zerg.name} from ${this.name} to ${this.colony.name} logistics`);
+						zerg.reassign(this.colony.overlords.logistics, Roles.transport);
+					}
+				}			
+			}
 			this.remove();
 		}
 	}
-
 }
 

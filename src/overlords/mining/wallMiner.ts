@@ -1,5 +1,6 @@
 import { log } from 'console/log';
 import { CreepSetup } from 'creepSetups/CreepSetup';
+import { DirectiveWallMine } from 'directives/colony/wallMine';
 import { DirectiveWallDestroy } from 'directives/offense/wallDestroy';
 import {$} from '../../caching/GlobalCache';
 import {CombatSetups, Roles, Setups} from '../../creepSetups/setups';
@@ -15,17 +16,17 @@ import {Overlord} from '../Overlord';
  * Destroy a wall
  */
 @profile
-export class WallDestroyOverlord extends Overlord {
+export class WallMineOverlord extends Overlord {
 
-	wallDestroyers: Zerg[];
-	directive: DirectiveWallDestroy;
+	wallMiners: Zerg[];
+	directive: DirectiveWallMine;
 	setup: CreepSetup;
 
-	constructor(directive: DirectiveWallDestroy) {
-		super(directive, 'wallDestroy', OverlordPriority.maintenance.wallDestroy);
+	constructor(directive: DirectiveWallMine) {
+		super(directive, 'wallMine', OverlordPriority.maintenance.wallMine);
 		this.directive = directive;
-		this.wallDestroyers = this.zerg(Roles.dismantler);
-		this.setup=CombatSetups.dismantlers.default;
+		this.wallMiners = this.zerg(Roles.dismantler);
+		this.setup=CombatSetups.dismantlers.wallMiner;
 	}
 
 	init() {
@@ -50,6 +51,6 @@ export class WallDestroyOverlord extends Overlord {
 	}
 
 	run() {
-		this.autoRun(this.wallDestroyers, wallDestroyer => this.handleWallDestroyer(wallDestroyer));
+		this.autoRun(this.wallMiners, wallDestroyer => this.handleWallDestroyer(wallDestroyer));
 	}
 }

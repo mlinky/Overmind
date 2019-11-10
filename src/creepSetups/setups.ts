@@ -337,6 +337,11 @@ export const CombatSetups = {
 			sizeLimit: Infinity,
 		}),
 
+		wallMiner: new CreepSetup(Roles.dismantler, {
+			pattern  : [WORK, WORK, WORK, WORK, MOVE],
+			sizeLimit: Infinity,
+		}),
+
 		armored: new CreepSetup(Roles.dismantler, {
 			pattern  : [TOUGH, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE],
 			sizeLimit: Infinity,

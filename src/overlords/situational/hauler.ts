@@ -71,20 +71,49 @@ export class HaulingOverlord extends Overlord {
 					// log.info(`Is not a store structure`);
 						store = {energy: this.directive.storeStructure.store.energy};
 					}
+					// Fill up properly - thanks MatthewARoy
+					let totalDrawn = 0; // Fill to full
 					for (const resourceType in store) {
 						if (store[resourceType] > 0) {
-							hauler.task = Tasks.withdraw(this.directive.storeStructure, <ResourceConstant>resourceType);
-							return;
+							if (!!hauler.task) {
+								hauler.task = Tasks.withdraw(this.directive.storeStructure, <ResourceConstant>resourceType).fork(hauler.task);
+							} else {
+								hauler.task = Tasks.withdraw(this.directive.storeStructure, <ResourceConstant>resourceType);
+							}
+							totalDrawn += store[resourceType];
+							if (totalDrawn >= hauler.carryCapacity) {
+								return;
+							}
 						}
 					}
+					if (hauler.task) {
+						// If can't fill up, just go ahead and go home
+						log.notify(`Can't finish filling up ${totalDrawn} ${JSON.stringify(hauler.task)} ${this.room}`);
+						return;
+					}
+
 				} else if (this.directive.ruinStoreStructure) {
-					let store: { [resourceType: string]: number } = this.directive.ruinStoreStructure.store;
+					const store: { [resourceType: string]: number } = this.directive.ruinStoreStructure.store;
+					// Fill up properly - thanks MatthewARoy
+					let totalDrawn = 0; // Fill to full
 					for (const resourceType in store) {
 						if (store[resourceType] > 0) {
-							hauler.task = Tasks.withdraw(this.directive.ruinStoreStructure, <ResourceConstant>resourceType);
-							return;
+							if (!!hauler.task) {
+								hauler.task = Tasks.withdraw(this.directive.ruinStoreStructure, 
+											<ResourceConstant>resourceType).fork(hauler.task);
+							} else {
+								hauler.task = Tasks.withdraw(this.directive.ruinStoreStructure, <ResourceConstant>resourceType);
+							}
+							totalDrawn += store[resourceType];
+							if (totalDrawn >= hauler.carryCapacity) {
+								return;
+							}
 						}
 					}
+					if (hauler.task) {
+						log.notify(`Can't finish filling up ${totalDrawn} ${JSON.stringify(hauler.task)} ${this.room}`);
+						return;
+					}					
 				}
 				// Shouldn't reach here
 				log.warning(`${hauler.name} in ${hauler.room.print}: nothing to collect!`);

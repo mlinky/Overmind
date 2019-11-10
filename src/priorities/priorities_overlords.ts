@@ -22,7 +22,6 @@ export let OverlordPriority = {
 		destroy         : 300,
 		healPoint       : 301,
 		siege           : 302,
-		wallDestroy     : 398,
 		controllerAttack: 399
 	},
 
@@ -43,6 +42,11 @@ export let OverlordPriority = {
 	outpostDefense: {
 		outpostDefense: 550,
 		guard         : 551,
+	},
+
+	maintenance: {				// Used for wall tidying
+		wallDestroy   :580,
+		wallMine      :581,
 	},
 
 	upgrading: {				// Spawning upgraders

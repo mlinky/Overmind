@@ -1,17 +1,20 @@
+import { CombatSetups, Roles } from 'creepSetups/setups';
+import { WallMineOverlord } from 'overlords/mining/wallMiner';
 import { WallDestroyOverlord } from 'overlords/offense/wallDestroyer';
+import { OverlordPriority } from 'priorities/priorities_overlords';
 import { Visualizer } from 'visuals/Visualizer';
 import {log} from '../../console/log';
 import {profile} from '../../profiler/decorator';
 import {Directive} from '../Directive';
 
 /**
- * Spawns a creep to destroy a wall
+ * Spawns a creep to mine a wall
  */
 @profile
-export class DirectiveWallDestroy extends Directive {
+export class DirectiveWallMine extends Directive {
 
-	static directiveName = 'wallDestroy';
-	static color = COLOR_RED;
+	static directiveName = 'wallMine';
+	static color = COLOR_PURPLE;
 	static secondaryColor = COLOR_BLUE;
 
 	constructor(flag: Flag) {
@@ -19,11 +22,11 @@ export class DirectiveWallDestroy extends Directive {
 	}
 
 	spawnMoarOverlords() {
- 		this.overlords.wallDestroy = new WallDestroyOverlord(this);
+ 		this.overlords.wallMine = new WallMineOverlord(this);
 	}
 
 	init(): void {
-		this.alert(`Destroying wall in ${this.pos.roomName}`);
+		this.alert(`Mining wall in ${this.pos.roomName}`);
 	}
 
 	getTarget(): Structure | undefined {

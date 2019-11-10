@@ -1,19 +1,15 @@
-import { CombatSetups, Roles } from 'creepSetups/setups';
-import { WallMineOverlord } from 'overlords/mining/wallMiner';
-import { WallDestroyOverlord } from 'overlords/offense/wallDestroyer';
-import { OverlordPriority } from 'priorities/priorities_overlords';
-import { Visualizer } from 'visuals/Visualizer';
+import {TargetDismantleOverlord } from 'overlords/mining/targetDismantler';
 import {log} from '../../console/log';
 import {profile} from '../../profiler/decorator';
 import {Directive} from '../Directive';
 
 /**
- * Spawns a creep to mine a wall
+ * Spawns a creep to dismantle a structure
  */
 @profile
-export class DirectiveWallMine extends Directive {
+export class DirectiveTargetDismantle extends Directive {
 
-	static directiveName = 'wallMine';
+	static directiveName = 'targetDismantle';
 	static color = COLOR_PURPLE;
 	static secondaryColor = COLOR_BLUE;
 
@@ -22,17 +18,17 @@ export class DirectiveWallMine extends Directive {
 	}
 
 	spawnMoarOverlords() {
- 		this.overlords.wallMine = new WallMineOverlord(this);
+ 		this.overlords.wallMine = new TargetDismantleOverlord(this);
 	}
 
 	init(): void {
-		this.alert(`Mining wall in ${this.pos.roomName}`);
+		this.alert(`Dismantling in ${this.pos.roomName}`);
 	}
 
 	getTarget(): Structure | undefined {
 		const targetedStructures = this.pos.lookFor(LOOK_STRUCTURES) as Structure[];
 		for (const structure of targetedStructures) {
-			if (structure.structureType == STRUCTURE_WALL) {
+			if (structure.structureType == STRUCTURE_WALL || STRUCTURE_INVADER_CORE) {
 				return structure;
 			}
 		}
@@ -42,7 +38,7 @@ export class DirectiveWallMine extends Directive {
 		if (this.pos.isVisible) {
 			const target = this.getTarget();
 			if (!target) {
-				log.info(`Removing wall destroy directive`);
+				log.info(`Removing target dismantle directive`);
 				this.remove();
 			}
 		}

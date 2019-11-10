@@ -337,7 +337,7 @@ export const CombatSetups = {
 			sizeLimit: Infinity,
 		}),
 
-		wallMiner: new CreepSetup(Roles.dismantler, {
+		tonka: new CreepSetup(Roles.dismantler, {
 			pattern  : [WORK, WORK, WORK, WORK, MOVE],
 			sizeLimit: Infinity,
 		}),

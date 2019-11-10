@@ -46,7 +46,7 @@ export let OverlordPriority = {
 
 	maintenance: {				// Used for wall tidying
 		wallDestroy   :580,
-		wallMine      :581,
+		dismantle     :581,
 	},
 
 	upgrading: {				// Spawning upgraders

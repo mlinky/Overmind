@@ -23,6 +23,8 @@ import {CombatPlanner} from './strategy/CombatPlanner';
 import {Cartographer, ROOMTYPE_CONTROLLER, ROOMTYPE_SOURCEKEEPER} from './utilities/Cartographer';
 import {derefCoords, hasJustSpawned, minBy, onPublicServer} from './utilities/utils';
 import {MUON, MY_USERNAME, USE_TRY_CATCH} from './~settings';
+import { DirectivePairDestroy } from 'directives/offense/pairDestroy';
+import { DirectiveDismantle } from 'directives/targeting/dismantle';
 
 
 // export const DIRECTIVE_CHECK_FREQUENCY = 2;
@@ -197,6 +199,20 @@ export class Overseer implements IOverseer {
 																  DirectiveOutpostDefense.filter(flag));
 				if (room.dangerousHostiles.length > 0 && defenseFlags.length == 0) {
 					DirectiveGuard.create(room.dangerousHostiles[0].pos);
+				}
+			}
+			if (Game.time % 55 == 0) {
+				let cores = room.hostileStructures.filter(s => s.structureType == STRUCTURE_INVADER_CORE);
+				if (cores.length > 0) {
+					if (<number>_.get(cores[0],['level']) == 0) {
+						log.alert(`Found core in ${room.name} with ${cores[0]}`);
+						let res = DirectivePairDestroy.createIfNotPresent(cores[0].pos, 'pos', {name: ('pairDestroy:' + room.name)});
+						if (!!res) {
+							log.notify(`Destroying invader core in room ${room.name}`);
+						}
+					} else if (<number>_.get(cores[0],['level']) > 0) {
+						log.notify(`Invader core in room ${room.name}`);
+					}
 				}
 			}
 		}

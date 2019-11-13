@@ -58,7 +58,7 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 		// Offensive combat directives =================================================================================
 		case COLOR_RED:
 			switch (flag.secondaryColor) {
-				case COLOR_RED:
+				case COLOR_WHITE:
 					return new DirectiveSwarmDestroy(flag);
 				case COLOR_CYAN:
 					return new DirectivePairDestroy(flag);

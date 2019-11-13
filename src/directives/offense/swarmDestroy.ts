@@ -12,7 +12,7 @@ export class DirectiveSwarmDestroy extends Directive {
 
 	static directiveName = 'destroy';
 	static color = COLOR_RED;
-	static secondaryColor = COLOR_RED;
+	static secondaryColor = COLOR_WHITE;
 
 	overlords: {
 		destroy: SwarmDestroyerOverlord;

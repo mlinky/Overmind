@@ -3,6 +3,7 @@ import {SwarmDestroyerOverlord} from '../../overlords/offense/swarmDestroyer';
 import {profile} from '../../profiler/decorator';
 import {Visualizer} from '../../visuals/Visualizer';
 import {Directive} from '../Directive';
+import { SwarmConfig } from 'creepSetups/setups';
 
 /**
  * Spawns a 2x2 squad of coordinated creeps to destroy a room
@@ -13,13 +14,17 @@ export class DirectiveSwarmDestroy extends Directive {
 	static directiveName = 'destroy';
 	static color = COLOR_RED;
 	static secondaryColor = COLOR_WHITE;
+	swarmConfig = SwarmConfig.destroyer_2;
+	testMode = false;
 
 	overlords: {
 		destroy: SwarmDestroyerOverlord;
 	};
 
-	constructor(flag: Flag) {
+	constructor(flag: Flag, swarmConfig = SwarmConfig.destroyer_2, testMode = false) {
 		super(flag);
+		this.swarmConfig = swarmConfig;
+		this.testMode = testMode;
 	}
 
 	spawnMoarOverlords() {

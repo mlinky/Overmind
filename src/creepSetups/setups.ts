@@ -182,6 +182,61 @@ export const Setups = {
 
 };
 
+/**
+ * This object contains patterns for swarms
+ */
+
+export const SwarmConfig = {
+
+	destroyer_1 : {
+		heal  : 3,
+		hydra : 0,
+		zerg  : 1,
+	},
+
+	destroyer_2 : {
+		heal  : 2,
+		hydra : 0,
+		zerg  : 2,
+	},
+
+	destroyer_3 : {
+		heal  : 1,
+		hydra : 0,
+		zerg  : 3,
+	},
+
+	destroyer_4 : {
+		heal  : 0,
+		hydra : 0,
+		zerg  : 4,
+	},
+
+	hydra_1 : {
+		heal  : 3,
+		hydra : 1,
+		zerg  : 0,
+	},
+	
+	hydra_2 : {
+		heal  : 2,
+		hydra : 2,
+		zerg  : 0,
+	},
+	
+	hydra_3 : {
+		heal  : 1,
+		hydra : 3,
+		zerg  : 0,
+	},
+	
+	hydra_4 : {
+		heal  : 0,
+		hydra : 4,
+		zerg  : 0,
+	},
+	
+}
 
 /**
  * This object contains default body setups for various types of combat-related creeps
@@ -192,6 +247,11 @@ export const CombatSetups = {
 	 * Zerglings are melee-only creeps (with exception of sourceKeeper setup)
 	 */
 	zerglings: {
+
+		basic: new CreepSetup(Roles.melee, {
+			pattern  : [ATTACK, MOVE],
+			sizeLimit: 1,
+		}),
 
 		default: new CreepSetup(Roles.melee, {
 			pattern  : [ATTACK, MOVE],
@@ -224,6 +284,11 @@ export const CombatSetups = {
 	 * Hydralisks are ranged creeps which may have a small amount of healing
 	 */
 	hydralisks: {
+
+		basic: new CreepSetup(Roles.ranged, {
+			pattern  : [RANGED_ATTACK, MOVE],
+			sizeLimit: 1,
+		}),
 
 		early: new CreepSetup(Roles.ranged, {
 			pattern  : [RANGED_ATTACK, MOVE],
@@ -263,6 +328,11 @@ export const CombatSetups = {
 	 * Healers (transfusers) are creeps which only do healing
 	 */
 	healers: {
+
+		basic: new CreepSetup(Roles.healer, {
+			pattern  : [HEAL, MOVE],
+			sizeLimit: 1,
+		}),
 
 		default: new CreepSetup(Roles.healer, {
 			pattern  : [HEAL, MOVE],

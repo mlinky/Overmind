@@ -28,6 +28,7 @@ import {DirectiveTargetSiege} from './targeting/siegeTarget';
 import {DirectiveTerminalEmergencyState} from './terminalState/terminalState_emergency';
 import {DirectiveTerminalEvacuateState} from './terminalState/terminalState_evacuate';
 import {DirectiveTerminalRebuildState} from './terminalState/terminalState_rebuild';
+import { SwarmConfig } from 'creepSetups/setups';
 
 /**
  * This is the initializer for directives, which maps flags by their color code to the corresponding directive
@@ -65,8 +66,30 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 				case COLOR_PURPLE:
 					return new DirectiveControllerAttack(flag);
 				case COLOR_BLUE:
-					return new DirectiveWallDestroy(flag);			}
+					return new DirectiveWallDestroy(flag);			
+			}
 			break;
+		
+		case COLOR_BROWN:
+			switch (flag.secondaryColor) {
+				case COLOR_RED:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.destroyer_1, true);
+				case COLOR_PURPLE:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.destroyer_2, true);
+				case COLOR_BLUE:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.destroyer_3, true);
+				case COLOR_CYAN:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.destroyer_4, true);
+				case COLOR_GREEN:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.hydra_1, true);
+				case COLOR_YELLOW:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.hydra_2, true);
+				case COLOR_ORANGE:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.hydra_3, true);
+				case COLOR_BROWN:
+					return new DirectiveSwarmDestroy(flag, SwarmConfig.hydra_4, true);
+					}
+			break;								
 
 		// Defensive combat directives =================================================================================
 		case COLOR_BLUE:

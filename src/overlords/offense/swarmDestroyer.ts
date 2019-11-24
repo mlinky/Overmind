@@ -1,3 +1,4 @@
+import { CreepSetup } from 'creepSetups/CreepSetup';
 import {$} from '../../caching/GlobalCache';
 import {log} from '../../console/log';
 import {CombatSetups, Roles} from '../../creepSetups/setups';
@@ -12,7 +13,6 @@ import {Visualizer} from '../../visuals/Visualizer';
 import {CombatZerg} from '../../zerg/CombatZerg';
 import {Swarm} from '../../zerg/Swarm';
 import {SwarmOverlord} from '../SwarmOverlord';
-import { CreepSetup } from 'creepSetups/CreepSetup';
 
 const DEBUG = false;
 
@@ -123,7 +123,8 @@ export class SwarmDestroyerOverlord extends SwarmOverlord {
 	}
 
 	init() {
-		let numSwarms = this.directive.memory.amount || 1;
+		// let numSwarms = this.directive.memory.amount || 1;
+		let numSwarms = 1;
 		if (RoomIntel.inSafeMode(this.pos.roomName)) {
 			numSwarms = 0;
 		}

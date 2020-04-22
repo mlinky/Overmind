@@ -1,5 +1,6 @@
 // Jump table to instantiate flags based on type
 
+import { SwarmConfig } from 'creepSetups/setups';
 import { DirectiveBulkDismantle } from './colony/bulkDismantle';
 import {DirectiveClearRoom} from './colony/clearRoom';
 import {DirectiveColonize} from './colony/colonize';
@@ -28,7 +29,6 @@ import {DirectiveTargetSiege} from './targeting/siegeTarget';
 import {DirectiveTerminalEmergencyState} from './terminalState/terminalState_emergency';
 import {DirectiveTerminalEvacuateState} from './terminalState/terminalState_evacuate';
 import {DirectiveTerminalRebuildState} from './terminalState/terminalState_rebuild';
-import { SwarmConfig } from 'creepSetups/setups';
 
 /**
  * This is the initializer for directives, which maps flags by their color code to the corresponding directive

@@ -236,7 +236,7 @@ export const SwarmConfig = {
 		zerg  : 0,
 	},
 	
-}
+};
 
 /**
  * This object contains default body setups for various types of combat-related creeps

@@ -1,7 +1,10 @@
+import { log } from 'console/log';
 import {CreepSetup} from '../creepSetups/CreepSetup';
 import {profile} from '../profiler/decorator';
 import {Swarm} from '../zerg/Swarm';
 import {CombatOverlord} from './CombatOverlord';
+
+const DEBUG_SWARMOVERLORDS=true;
 
 /**
  * SwarmOverlords extend the base CombatOverlord class, providing additional methods for spawning and controlling swarms
@@ -20,6 +23,8 @@ export abstract class SwarmOverlord extends CombatOverlord {
 		const creepQuantities: { [role: string]: number } = {};
 		const neededQuantities: { [role: string]: number } = {};
 
+		if (DEBUG_SWARMOVERLORDS) {log.info(`In Swarmwishlist`);}
+
 		// Handle filling out existing swarms first
 		const validSwarms = _.filter(this.swarms, swarm => !swarm.isExpired);
 		for (const swarm of validSwarms) {
@@ -36,6 +41,7 @@ export abstract class SwarmOverlord extends CombatOverlord {
 				const spawnQuantity = amount - existingCreepsOfRole.length;
 				for (let i = 0; i < spawnQuantity; i++) {
 					this.requestCreep(setup, {priority: priority});
+					if (DEBUG_SWARMOVERLORDS) {log.info(`Spawning ${JSON.stringify(setup)}`);}
 				}
 			}
 		}
@@ -50,6 +56,7 @@ export abstract class SwarmOverlord extends CombatOverlord {
 				neededQuantities[setup.role] += amount;
 				for (let i = 0; i < amount; i++) {
 					this.requestCreep(setup, {priority: priority + 0.5});
+					if (DEBUG_SWARMOVERLORDS) {log.info(`Spawning ${JSON.stringify(setup)}`);}
 				}
 			}
 		}

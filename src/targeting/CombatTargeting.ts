@@ -1,5 +1,6 @@
 import {log} from '../console/log';
 import {CombatIntel} from '../intel/CombatIntel';
+import {MatrixLib} from '../matrix/MatrixLib';
 import {Pathing} from '../movement/Pathing';
 import {AttackStructurePriorities, AttackStructureScores} from '../priorities/priorities_structures';
 import {HostileStructurePriorities} from '../priorities/priorities_structures';
@@ -8,6 +9,7 @@ import {maxBy} from '../utilities/utils';
 import {Visualizer} from '../visuals/Visualizer';
 import {Swarm} from '../zerg/Swarm';
 import {Zerg} from '../zerg/Zerg';
+import {MY_USERNAME} from '../~settings';
 
 @profile
 export class CombatTargeting {
@@ -66,17 +68,38 @@ export class CombatTargeting {
 		});
 	}
 
-	static findClosestHostile(zerg: Zerg, checkReachable = false, ignoreCreepsAtEdge = true): Creep | undefined {
+
+	static findClosestHostile(zerg: Zerg, opts: {
+		checkReachable: boolean,
+		ignoreCreepsAtEdge: boolean,
+		playerOnly: boolean,
+		onlyUnramparted: boolean
+	}): Creep | undefined {
+
+		_.defaults(opts, {
+			checkReachable    : false,
+			ignoreCreepsAtEdge: true,
+			playerOnly        : false,
+			onlyUnramparted   : false
+		});
 		if (zerg.room.hostiles.length > 0) {
 			let targets: Creep[];
-			if (ignoreCreepsAtEdge) {
-				targets = _.filter(zerg.room.hostiles, hostile => hostile.pos.rangeToEdge > 0);
+			const potentialTargets = opts.playerOnly ? zerg.room.playerHostiles : zerg.room.hostiles;
+			if (opts.ignoreCreepsAtEdge) {
+				targets = _.filter(potentialTargets, hostile => hostile.pos.rangeToEdge > 0);
 			} else {
-				targets = zerg.room.hostiles;
+				targets = potentialTargets;
 			}
-			if (checkReachable) {
+			if (opts.onlyUnramparted) {
+				targets = _.filter(targets, hostile => !hostile.inRampart);
+			}
+			if (opts.checkReachable) {
 				const targetsByRange = _.sortBy(targets, target => zerg.pos.getRangeTo(target));
-				return _.find(targetsByRange, target => Pathing.isReachable(zerg.pos, target.pos, zerg.room.barriers));
+				return _.find(targetsByRange, target =>
+					Pathing.isReachable(zerg.pos, target.pos, zerg.room.barriers.filter(
+						barrier => barrier.structureType == STRUCTURE_WALL
+								   || (barrier.structureType == STRUCTURE_RAMPART
+									   && (barrier.owner.username == MY_USERNAME || !barrier.isPublic)))));
 			} else {
 				return zerg.pos.findClosestByRange(targets) as Creep | undefined;
 			}
@@ -97,22 +120,25 @@ export class CombatTargeting {
 	 * Finds the best (friendly) target in range that a zerg can currently heal
 	 */
 	static findBestHealingTargetInRange(healer: Zerg, range = 3, friendlies = healer.room.creeps): Creep | undefined {
+		const tempHitsPredicted: { [id: string]: number } = {};
 		return maxBy(_.filter(friendlies, f => healer.pos.getRangeTo(f) <= range), friend => {
 			if (friend.hitsPredicted == undefined) friend.hitsPredicted = friend.hits;
 			const attackProbability = 0.5;
+			tempHitsPredicted[friend.id] = friend.hitsPredicted;
 			for (const hostile of friend.pos.findInRange(friend.room.hostiles, 3)) {
-				if (hostile.pos.isNearTo(friend)) {
-					friend.hitsPredicted -= attackProbability * CombatIntel.getAttackDamage(hostile);
-				} else {
-					friend.hitsPredicted -= attackProbability * (CombatIntel.getAttackDamage(hostile)
-																 + CombatIntel.getRangedAttackDamage(hostile));
+				if (!friend.inRampart) {
+					if (hostile.pos.isNearTo(friend)) {
+						tempHitsPredicted[friend.id] -= attackProbability * CombatIntel.getAttackDamage(hostile);
+					} else {
+						tempHitsPredicted[friend.id] -= attackProbability * CombatIntel.getRangedAttackDamage(hostile);
+					}
 				}
 			}
-			const healScore = friend.hitsMax - friend.hitsPredicted;
+			const missingHits = friend.hitsMax - tempHitsPredicted[friend.id];
 			if (healer.pos.getRangeTo(friend) > 1) {
-				return healScore + CombatIntel.getRangedHealAmount(healer.creep);
+				return Math.min(missingHits, CombatIntel.getRangedHealAmount(healer.creep));
 			} else {
-				return healScore + CombatIntel.getHealAmount(healer.creep);
+				return Math.min(missingHits, CombatIntel.getHealAmount(healer.creep));
 			}
 		});
 	}
@@ -140,6 +166,10 @@ export class CombatTargeting {
 			} else {
 				return zerg.pos.findClosestByRange(structures) as Structure | undefined;
 			}
+		}
+		const core = _.filter(zerg.room.hostileStructures, s => s.structureType.toString() == 'invaderCore');
+		if (core.length != 0) {
+			return core[0];
 		}
 	}
 
@@ -298,14 +328,13 @@ export class CombatTargeting {
 			swampCost   : 2,
 			roomCallback: rn => {
 				if (rn != roomName) return false;
-				const matrix = Pathing.getSwarmTerrainMatrix(roomName, swarm.width, swarm.height).clone();
+
+				const matrix = MatrixLib.getSwarmTerrainMatrix(roomName, {plainCost: 1, swampCost: 5},
+															   swarm.width, swarm.height);
 				for (const barrier of room.barriers) {
 					const randomFactor = Math.min(Math.round(randomness * Math.random()), 100);
 					const cost = 100 + Math.round((barrier.hits / maxWallHits) * 100) + randomFactor;
-					const setPositions = Pathing.getPosWindow(barrier.pos, -swarm.width, -swarm.height);
-					for (const pos of setPositions) {
-						matrix.set(pos.x, pos.y, Math.max(cost, matrix.get(pos.x, pos.y)));
-					}
+					MatrixLib.setToMaxCostAfterMaxPooling(matrix, [barrier], swarm.width, swarm.height, cost);
 				}
 				if (displayCostMatrix) {
 					Visualizer.displayCostMatrix(matrix, roomName);

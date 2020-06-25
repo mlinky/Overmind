@@ -6,6 +6,7 @@ import {dismantleTargetType, TaskDismantle} from './instances/dismantle';
 import {dropTargetType, TaskDrop} from './instances/drop';
 // import {fleeTargetType, TaskFlee} from './instances/flee';
 import {fortifyTargetType, TaskFortify} from './instances/fortify';
+import {generateSafeModeTargetType, TaskGenerateSafeMode} from './instances/generateSafeMode';
 import {getBoostedTargetType, TaskGetBoosted} from './instances/getBoosted';
 import {getRenewedTargetType, TaskGetRenewed} from './instances/getRenewed';
 import {goToRoomTargetType, TaskGoToRoom} from './instances/goToRoom';
@@ -77,12 +78,12 @@ export class Tasks {
 	// 	return new TaskFlee(target, options);
 	// }
 
-	static fortify(target: fortifyTargetType, options = {} as TaskOptions): TaskFortify {
-		return new TaskFortify(target, options);
+	static fortify(target: fortifyTargetType, hitsMax?: number, options = {} as TaskOptions): TaskFortify {
+		return new TaskFortify(target, hitsMax, options);
 	}
 
 	static getBoosted(target: getBoostedTargetType,
-					  boostType: _ResourceConstantSansEnergy,
+					  boostType: ResourceConstant,
 					  amount?: number,
 					  options = {} as TaskOptions): TaskGetBoosted {
 		return new TaskGetBoosted(target, boostType, amount, options);
@@ -159,6 +160,10 @@ export class Tasks {
 
 	static withdrawAll(target: withdrawAllTargetType, options = {} as TaskOptions): TaskWithdrawAll {
 		return new TaskWithdrawAll(target, options);
+	}
+
+	static generateSafeMode(target: generateSafeModeTargetType, options = {} as TaskOptions): TaskGenerateSafeMode {
+		return new TaskGenerateSafeMode(target, options);
 	}
 
 }

@@ -3,7 +3,7 @@ import {hasPos} from '../declarations/typeGuards';
 import {CombatIntel} from '../intel/CombatIntel';
 import {Mem} from '../memory/Memory';
 import {normalizePos} from '../movement/helpers';
-import {CombatMoveOptions, Movement, NO_ACTION, SwarmMoveOptions} from '../movement/Movement';
+import {CombatMoveOptions, Movement, SwarmMoveOptions} from '../movement/Movement';
 import {CombatOverlord} from '../overlords/CombatOverlord';
 import {profile} from '../profiler/decorator';
 import {CombatTargeting} from '../targeting/CombatTargeting';
@@ -29,11 +29,11 @@ interface SwarmMemory {
 	lastInDanger?: number;
 }
 
-const SwarmMemoryDefaults: SwarmMemory = {
+const getDefaultSwarmMemory: () => SwarmMemory = () => ({
 	creeps     : [],
 	orientation: TOP,
 	numRetreats: 0,
-};
+});
 
 const ERR_NOT_ALL_OK = -7;
 
@@ -67,7 +67,7 @@ export class Swarm implements ProtoSwarm {
 	constructor(overlord: SwarmOverlord, ref: string, creeps: CombatZerg[], width = 2, height = 2) {
 		this.overlord = overlord;
 		this.ref = ref;
-		this.memory = Mem.wrap(overlord.memory, `swarm:${ref}`, SwarmMemoryDefaults);
+		this.memory = Mem.wrap(overlord.memory, `swarm:${ref}`, getDefaultSwarmMemory);
 		// Build the static formation by putting attackers at the front and healers at the rear
 		const paddedCreeps: (CombatZerg | undefined)[] = _.clone(creeps);
 		for (let i = paddedCreeps.length; i < width * height; i++) {
@@ -75,7 +75,7 @@ export class Swarm implements ProtoSwarm {
 		}
 		const creepScores = this.getCreepScores(paddedCreeps);
 		const sortedCreeps = _.sortBy(paddedCreeps,
-									creep => creepScores[creep != undefined ? creep.name : 'undefined']);
+									  creep => creepScores[creep != undefined ? creep.name : 'undefined']);
 		this.uniformCreepType = (_.unique(_.filter(_.values(creepScores), score => score != 0)).length <= 1);
 		this.staticFormation = _.chunk(sortedCreeps, width);
 		this.width = width;
@@ -152,7 +152,8 @@ export class Swarm implements ProtoSwarm {
 	}
 
 	get print(): string {
-		return '<a href="#!/room/' + Game.shard.name + '/' + this.anchor.roomName + '">[' + `Swarm ` + this.ref + ']</a>';
+		return '<a href="#!/room/' + Game.shard.name + '/' + ((this.anchor
+															   || this.rooms[0])).roomName + '">[' + `Swarm ` + this.ref + ']</a>';
 	}
 
 	debug(...args: any[]) {
@@ -606,11 +607,11 @@ export class Swarm implements ProtoSwarm {
 			return this.orientation;
 		}
 		const dxList = _.flatten(_.map(this.creeps,
-									 creep => _.map(targets,
-													target => target.pos.x - creep.pos.x))) as number[];
+									   creep => _.map(targets,
+													  target => target.pos.x - creep.pos.x))) as number[];
 		const dyList = _.flatten(_.map(this.creeps,
-									 creep => _.map(targets,
-													target => target.pos.y - creep.pos.y))) as number[];
+									   creep => _.map(targets,
+													  target => target.pos.y - creep.pos.y))) as number[];
 		const dx = _.sum(dxList) / dxList.length || 0;
 		const dy = _.sum(dyList) / dyList.length || 0;
 		this.debug(`dx: ${dx}, dy: ${dy}`);

@@ -3,10 +3,75 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+(!) NOTE: This release of Overmind now requires Node 10+ and Rollup 2+ to deploy. You will need to check `node --version` to verify that you have at least 10.0, then you need to run `npm install` to update Rollup and several other key deployment packages.
+
 ### Added
+- Added `MatrixLib` class that performs a variety of cost matrix manupulations. Many methods from `Pathing` have been moved to this class.
+- Added `Zerg.avoidDanger()` method for use primarily by non-combat zerg which will replace the current `Zerg.flee()` logic as the default retreating response when working in a room which becomes unsafe.
+- Added a new `packrat.ts` module for compressing and retrieving room positions, ids, and coordinates as utf-16 characters. The methods are quite performant, taking about 100ns per RoomPosition and 500ns per id to execute on shard2 public server, and reduce memory impact by up to 95% in the case of packed room position lists. Plugging this in to many places where I had previously stored coordinates or room positions in Memory reduced total memory impact by about 70%. Exported packrat functions:
+    - packId, unpackId, packIdList, unpackIdList: Convert a standard 24-character hex id in screeps to a compressed UTF-16 encoded string of length 6. Benchmarking: average of 500ns to pack, 1.2us to unpack per id on shard2 public server, reduce stringified size by up to 81% (packIdList)
+    - packCoord, unpackCoord, packCoordList, unpackCoordList, unpackCoordAsPos, unpackCoordListAsPosList: Packs a coord as a single utf-16 character. Benchmarking: average of 150ns to pack, 100ns to unpack per coord on shard2 public server, reduce stringified size by up to 94% (packCoordList)
+    - packPos, unpackPos, packPosList, unpackPosList: Packs a RoomPosition as a pair utf-16 characters. Benchmarking: average of 100-200ns per position to pack, 500-1000ns to unpack on shard2 public server, reduce stringified size by 95% (packPosList)
+- @Davaned: Added `Colony.suspendOutpost` methods which allow a colony to temporarily cease operations in an outpost which is currently not viable, such as having an invader core spawn in the room
+- Added a global PERMACACHE object which is used to track immutable properties such as Cartographer.roomType or creep body compositions. Plugged into several points in the codebase, and working on further integration.
+- Added a remote upgrading directive and overlord: will spawn haulers and upgraders to quickly upgrade a far-away room and integrates with the new portal code. Carriers will also haul valuable resources from un-owned store structures on their return trip to the parent colony.
+- Refactored the Zerg class to extend AnyZerg and added a PowerZerg class which also extends AnyZerg. A number of methods throughout the codebase (especially on Movement) have been changed to take AnyZerg as an argument.
+- Lots of new methods on RoomIntel:
+    - RoomIntel.retrieveRoomObjectData retrieves and de-compresses the stored data on room layouts, including saved owned structures, portals, sources, minerals, SKlairs, and controller info
+    - RoomIntel.getRoomStatus provides a cached version of Game.map.getRoomStatus
+    - RoomIntel.findPortalsInRange searches for open portals within a certain range of any colony
+    - RoomIntel.getMyZoneStatus returns the type of zone that you are currently spawned in. I will use this method to implement novice zone restrictions in the near future
+    - Methods for working with stored room memory data in human-readable format:
+        - RoomIntel.getExpansionData
+        - RoomIntel.setExpansionData
+        - RoomIntel.getPortalInfo
+        - RoomIntel.getSourceInfo
+        - RoomIntel.getControllerInfo
+        - RoomIntel.getImportantStructureInfo
+        - RoomIntel.getAllRoomObjectInfo
+- Merged and modified pull request #156 from @zGeneral, which adds "room poisoner" functionality to wall off sources and controllers in unused rooms
+- Added portal capabilities and automatic portal pathing to the `Pathing` module!
+- Added and plugged in new `CombatCreepSetup` class which creates more flexible creep bodies based on the desired boost types. If lower tier move boosts are the best available, the body ratios are adjusted accordingly to maintain a target move speed.
+- Improvements to the `EvolutionChamber` to utilize the new terminal network and use a wider variety of boosts, not just T3.
+    - `EvolutionChamber.bestBoostAvailable` takes a BoostType ('attack', 'tough', 'move', etc.) and amount and returns the highest tier boost that is either available in the colony or obtainable throught the terminal network to boost that type of part.
+    - The evo chamber locks resources from the terminal network that it is about to use to prevent them from being transported elsewhere
+- Colonies now have a `Colony.state` property which consolidates all behavior-altering hooks which can be modified by directives
+- Rewrote a large portion of the `ManagerOverlord` to allow for more flexible transfer between storage and terminal.
+    - Previously, storage was usable only for energy, which resulted in terminals operating near capacity and wasted a lot of the capacity of a room
+    - The new system seeks to maintain LAB_MIENRAL_CAPACITY + 500 +/- 500 mineral compounds of each type (more for base resources) and 50000 +/- 5000 energy within the terminal (other resources treated similarly) and will offload everything else into storage
+- Huge changes to `TraderJoe`. The new version employs the `Game.market.getHistory()` functionality, and should be much better about utilizing buy and sell orders for resources. It should also be better at computing competitive but sensible prices to place orders at, and will seek to make its orders more competitive by adjusting the price if the order is not selling in a timely manner.
+- Completely rewrote the `TerminalNetwork` system. The new version should have much better resource acquisition latency and is inspired by Factorio's logistics system. It works like this:
+    - Each colony with a terminal can be in one of 5 states for each resource depending on how much of the resource it has and on other conditions:
+        - Active providers will actively push resources from the room into other rooms in the terminal network which are requestors or will sell the resource on the market no receiving rooms are available
+        - Passive providers will place their resources at the disposal of the terminal network but don't actively want to get rid of stuff
+        - Equilibrium nodes are rooms which are near their desired amount for the resource and prefer to stay there
+        - Passive requestors are rooms which have less than their desired amount of the resource but don't have an immediate need for it; they will request resources from activeProviders and passiveProviders
+        - Active requestors are rooms which have an immediate need for and insufficient amounts of a resource; they will request resources from any room which is not also an activeRequestor
+    - The state of each room is determined by a `Thresholds` object, which has `target`, `tolerance`, and (posisbly undefined) `surplus` properties. Conditions for each state are based on `amount` of resource in a colony:
+        - Active provider: `amount > surplus` (if defined) or `amont > target + tolerance` and room is near capacity
+        - Passive provider: `surplus >= amount > target + tolerance`
+        - Equilibrium: `target + tolerance >= amount >= target - tolerance`
+        - Passive requestor: `target - tolerance > amount`
+        - Active requestor: can only be placed in this state by an active call to `TerminalNetwork.requestResource` while `target > amount`
+    - To determine which room to request/provide resources from/to, a heuristic is used which tries to minimize transaction cost while accounting for:
+    	- If a terminal has a high output load (often on cooldown), receivers will de-prioritize it
+    	- If a terminal is far away, receivers will wait longer to find a less expensive sender
+    	- Bigger transactions with higher costs will wait longer for a closer colony, while smaller transactions are less picky
+    - The new system uses `Colony` in place of many arguments which were `StructureTerminal`, as it looks only at `colony.assets` when determining what to send; this fits with the new changes to the `ManagerOverlord` to allow for more flexible transfer between storage and terminal
+    - New `TerminalNetwork.canObtainResource(resource, amount)` method simulates a resource transfer (or purchase via market) using a `dryRun` option to be able to tell with near 100% certainty whether a certain resource will be available through the network.
+    - `TerminalNetwork.lockResource(resource, amount)` prevents a specified amount of a resource from being withdrawn from the room via the network. Useful for preventing ingredients or boosts which will soon be used from leaving the colony.
+- Added CPU/resource profiling to `Overlord`s. Use the `profileOverlord()` console command to activate this.
+- Merged a lot of additions from @Davaned's branch(es)
+    - Initial support for power mining and power processing
+    - Preliminary programs for dealing with strongholds (level 1-4)
+    - Lots of defensive improvements
+    - Harassment overlords periodically spawn creeps to skirmish in enemy outposts
+- Added modules for use in the reinforcement learning side project:
+    - The `ActionParser` module provides a line of direct interaction for the external Python optimizers to control creep actions via the `Memory.reinforcementLearning` object.
+    - The `TrainingOpponents` file provides a set of rudimentary opponents to train the RL models against.
 - Created a [documentation site](https://bencbartlett.github.io/overmind-docs/) using TypeDoc!
     - Added/reformatted docstring-comments throughout the codebase
-- Added the `RemoteDebugger` module, which lets me remotely debug other Overmind players' code in real-time by communicating through public memory segments. 
+- Added the `RemoteDebugger` module, which lets me remotely debug other Overmind players' code in real-time by communicating through public memory segments.
     - You can start and end a debug session with the `startRemoteDebugSession()` and `endRemoteDebugSession()` commands
     - Debug sessions automatically time out after 1000 ticks unless extended
     - Ping me on Slack #overmind if you want me to debug something for you
@@ -18,6 +83,10 @@ All notable changes to this project will be documented in this file. The format 
     - EdgeWall: barriers placed as close as possible to all room exits
     - InnerWall: barriers placed to enclose structures but are recessed from the room exits
     - Exposed: key structures are pathable to from some room exit
+- Added lots of data tracking methods to `RoomIntel`:
+    - Harvesting data computes a variety of rollinga verages for energy harvesting in rooms to evaluate effectiveness of mining operations
+    - Casualty data computes effective energy and spawn costs of lost creeps
+    - These methods have been temporarily disabled to relieve room memory pressure, as they are not currently plugged in to anything
 - Added additional heap cleaning routines to prevent periodic bucket crashes. At low bucket, the global cache will periodically be cleared, and at even lower buckets, `Game.cpu.halt()` will occasionally be called.
 - `Visualizer` content:
     - Added `displayCostMatrix` method, which is useful for debugging pathfinding operations
@@ -36,7 +105,13 @@ All notable changes to this project will be documented in this file. The format 
     - Reduced terminal equilibrium energy from 100k to 50k
 
 ### Changed
-- MASSIVE memory size reduction: many common memory keys have been aliased to single-character names using a set of constant enums in `memory.d.ts`. For example, `memory.colony` is now `memory.C` and is referenced in code as `memory[_MEM.COLONY]`.
+- Changed the signature of Mem.wrap to take a memory defaults generator instead of an object. This will avoid future bugs which are caused by _.defaults(memObject, defaultMemObject) copying references of the default memory object and subsequent modifications to memory mutating the defaults object.
+- Another massive memory size reduction: plugged in `packrat.ts` methods to many places in the codebase where coordinates and positions are serialized. This, along with other changes to memory and logged stats, reduced memory impact by about 70% (1760kB -> 570kB)
+- Lots of changes to logistics systems to account for the recent(ish) changes to Structure.store and Creep.carry -> Creep.store
+- Updated the Grafana dashboard to account for new TerminalNetwork changes
+- Updated many of the deployment dependencies in package.json. You will need to `npm install` to update these packages.
+- Rewrote the extractor overlord to be more CPU efficient
+- Massive memory size reduction: many common memory keys have been aliased to single-character names using a set of constant enums in `memory.d.ts`. For example, `memory.colony` is now `memory.C` and is referenced in code as `memory[_MEM.COLONY]`.
     - You can expect your memory usage to drop by about half(!) after applying this change.
 - `MiningOverlord` will now suicide old miners when their replacements arrive, preventing excess CPU use
 - Major improvements to swarm target finding/avoiding logic
@@ -513,7 +588,7 @@ release of the Task system)
 
 [Unreleased]: https://github.com/bencbartlett/Overmind/compare/v0.5.2.1...HEAD
 [0.5.2.1]: https://github.com/bencbartlett/Overmind/compare/v0.5.2...v0.5.2.1
-[0.5.1]: https://github.com/bencbartlett/Overmind/compare/v0.5.1...v0.5.2
+[0.5.2]: https://github.com/bencbartlett/Overmind/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/bencbartlett/Overmind/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/bencbartlett/Overmind/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/bencbartlett/Overmind/compare/v0.4.0...v0.4.1

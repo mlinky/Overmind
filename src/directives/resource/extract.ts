@@ -21,7 +21,7 @@ export class DirectiveExtract extends Directive {
 	constructor(flag: Flag) {
 		super(flag);
 		if (this.colony) {
-			this.colony.destinations.push({pos: this.pos, order: this.memory[_MEM.TICK] || Game.time});
+			this.colony.destinations.push({pos: this.pos, order: this.memory[MEM.TICK] || Game.time});
 		}
 	}
 
@@ -46,6 +46,9 @@ export class DirectiveExtract extends Directive {
 	run() {
 		if (this.colony.level < 6) {
 			log.notify(`Removing extraction directive in ${this.pos.roomName}: room RCL insufficient.`);
+			this.remove();
+		} else if (!this.colony.terminal) {
+			log.notify(`Removing extraction directive in ${this.pos.roomName}: room is missing terminal.`);
 			this.remove();
 		}
 	}

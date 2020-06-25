@@ -1,9 +1,15 @@
 import {log} from '../../console/log';
 import {CombatIntel} from '../../intel/CombatIntel';
+import {DistractionOverlord} from '../../overlords/defense/distraction';
 import {PairDestroyerOverlord} from '../../overlords/offense/pairDestroyer';
 import {profile} from '../../profiler/decorator';
 import {Visualizer} from '../../visuals/Visualizer';
 import {Directive} from '../Directive';
+
+
+interface DirectivePairDestroyMemory extends FlagMemory {
+	persistent?: boolean;
+}
 
 /**
  * Spawns a pair of attacker/healer creeps to siege a room
@@ -17,6 +23,7 @@ export class DirectivePairDestroy extends Directive {
 
 	overlords: {
 		destroy: PairDestroyerOverlord;
+		distraction: DistractionOverlord;
 	};
 
 	constructor(flag: Flag) {

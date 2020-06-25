@@ -2,7 +2,13 @@ import {log} from '../console/log';
 import {profile} from '../profiler/decorator';
 import {Stats} from '../stats/stats';
 import {isIVM} from '../utilities/utils';
-import {DEFAULT_OPERATION_MODE, DEFAULT_OVERMIND_SIGNATURE, PROFILER_COLONY_LIMIT, USE_PROFILER} from '../~settings';
+import {
+	DEFAULT_OPERATION_MODE,
+	DEFAULT_OVERMIND_SIGNATURE,
+	MY_USERNAME,
+	PROFILER_COLONY_LIMIT,
+	USE_SCREEPS_PROFILER
+} from '../~settings';
 
 export enum Autonomy {
 	Manual        = 0,
@@ -46,7 +52,7 @@ export class Mem {
 			log.warning(`Overmind requires isolated-VM to run. Change settings at screeps.com/a/#!/account/runtime`);
 			shouldRun = false;
 		}
-		if (USE_PROFILER && Game.time % 10 == 0) {
+		if (USE_SCREEPS_PROFILER && Game.time % 10 == 0) {
 			log.warning(`Profiling is currently enabled; only ${PROFILER_COLONY_LIMIT} colonies will be run!`);
 		}
 		if (Game.cpu.bucket < 500) {
@@ -70,7 +76,10 @@ export class Mem {
 		}
 		if (Memory.haltTick) {
 			if (Memory.haltTick == Game.time) {
-				(<any>Game.cpu).halt(); // TODO: remove any typing when typed-screeps updates to include this method
+				if (Game.cpu.halt) { // this is undefined on non-IVM
+					Memory.build--; // don't count this reset as a build
+					Game.cpu.halt();
+				}
 				shouldRun = false;
 			} else if (Memory.haltTick < Game.time) {
 				delete Memory.haltTick;
@@ -97,11 +106,11 @@ export class Mem {
 		}
 		lastTime = Game.time;
 		// Handle global time
-		if (!global.age) {
-			global.age = 0;
+		if (!global.GLOBAL_AGE) {
+			global.GLOBAL_AGE = 0;
 		}
-		global.age++;
-		Memory.stats.persistent.globalAge = global.age;
+		global.GLOBAL_AGE++;
+		Memory.stats.persistent.globalAge = global.GLOBAL_AGE;
 	}
 
 	static garbageCollect(quick?: boolean) {
@@ -115,15 +124,20 @@ export class Mem {
 		}
 	}
 
-	static wrap(memory: any, memName: string, defaults = {}, deep = false) {
-		if (!memory[memName]) {
-			memory[memName] = _.clone(defaults);
+	/**
+	 * Wrap a parent memory object with a key name and set the default properties for the child memory object if needed
+	 */
+	static wrap(memory: any, memName: string, getDefaults: () => ({ [key: string]: any }) = () => ({})) {
+		if (memory[memName] === undefined) {
+			memory[memName] = getDefaults();
+		} else if (Game.time == LATEST_GLOBAL_RESET_TICK) { // mem defaults would only change with a global reset
+			_.defaultsDeep(memory[memName], getDefaults());
 		}
-		if (deep) {
-			_.defaultsDeep(memory[memName], defaults);
-		} else {
-			_.defaults(memory[memName], defaults);
-		}
+		// if (deep) {
+		// 	_.defaultsDeep(memory[memName], defaults);
+		// } else {
+		// 	_.defaults(memory[memName], defaults);
+		// }
 		return memory[memName];
 	}
 
@@ -150,71 +164,59 @@ export class Mem {
 		return Mem._setDeep(object, keys, value);
 	}
 
-	private static formatOvermindMemory() {
-		if (!Memory.Overmind) {
-			Memory.Overmind = {};
-		}
-		if (!Memory.colonies) {
-			Memory.colonies = {};
-		}
-	}
-
-	private static formatPathingMemory() {
-		if (!Memory.pathing) {
-			Memory.pathing = {} as PathingMemory; // Hacky workaround
-		}
-		_.defaults(Memory.pathing, {
-			paths            : {},
-			distances        : {},
-			weightedDistances: {},
-		});
-	}
-
-	private static formatDefaultMemory() {
-		if (!Memory.rooms) {
-			Memory.rooms = {};
-		}
-		if (!Memory.creeps) {
-			Memory.creeps = {};
-		}
-		if (!Memory.flags) {
-			Memory.flags = {};
-		}
+	private static getDefaultMemory(): Memory {
+		return {
+			tick              : Game.time,
+			build             : 0,
+			assimilator       : {},
+			Overmind          : {},
+			combatPlanner     : {},
+			profiler          : {},
+			overseer          : {},
+			segmenter         : {},
+			roomIntel         : {},
+			colonies          : {},
+			rooms             : {},
+			creeps            : {},
+			powerCreeps       : {},
+			flags             : {},
+			spawns            : {},
+			pathing           : {distances: {}},
+			constructionSites : {},
+			stats             : {},
+			playerCreepTracker: {},
+			settings          : {
+				signature             : DEFAULT_OVERMIND_SIGNATURE,
+				operationMode         : DEFAULT_OPERATION_MODE,
+				log                   : {},
+				enableVisuals         : true,
+				resourceCollectionMode: 0,
+				allies                : [MY_USERNAME],
+				powerCollection       : {
+					enabled : false,
+					maxRange: 5,
+					minPower: 5000,
+				},
+				autoPoison            : {
+					enabled      : false,
+					maxRange     : 4,
+					maxConcurrent: 1,
+				},
+			},
+		};
 	}
 
 	static format() {
 		// Format the memory as needed, done once every global reset
-		this.formatDefaultMemory();
-		this.formatOvermindMemory();
-		this.formatPathingMemory();
-		// Rest of memory formatting
-		if (!Memory.settings) {
-			Memory.settings = {} as any;
-		}
-		if (!USE_PROFILER) {
-			delete Memory.profiler;
-		}
-		_.defaults(Memory.settings, {
-			signature    : DEFAULT_OVERMIND_SIGNATURE,
-			operationMode: DEFAULT_OPERATION_MODE,
-			log          : {},
-			enableVisuals: true,
-		});
-		if (!Memory.stats) {
-			Memory.stats = {};
-		}
-		if (!Memory.stats.persistent) {
-			Memory.stats.persistent = {};
-		}
-		if (!Memory.constructionSites) {
-			Memory.constructionSites = {};
-		}
+		_.defaultsDeep(Memory, Mem.getDefaultMemory());
+		// Increment build counter (if global reset is due to CPU halt, the count will have been decremented)
+		Memory.build++;
 		// Make global memory
 		this.initGlobalMemory();
 	}
 
 	private static initGlobalMemory() {
-		global._cache = <IGlobalCache>{
+		const defaultGlobalCache: IGlobalCache = {
 			accessed     : {},
 			expiration   : {},
 			structures   : {},
@@ -224,6 +226,7 @@ export class Mem {
 			roomPositions: {},
 			things       : {},
 		};
+		global._cache = defaultGlobalCache;
 	}
 
 	static clean() {
@@ -242,8 +245,9 @@ export class Mem {
 	 */
 	private static cleanHeap(): void {
 		if (Game.time % HEAP_CLEAN_FREQUENCY == HEAP_CLEAN_FREQUENCY - 3) {
-			if (Game.cpu.bucket < BUCKET_CPU_HALT) {
-				(<any>Game.cpu).halt();
+			if (Game.cpu.bucket < BUCKET_CPU_HALT && Game.cpu.halt !== undefined) {
+				Memory.build--; // don't count this reset as a build
+				Game.cpu.halt();
 			} else if (Game.cpu.bucket < BUCKET_CLEAR_CACHE) {
 				delete global._cache;
 				this.initGlobalMemory();
@@ -287,14 +291,18 @@ export class Mem {
 
 	private static cleanConstructionSites() {
 		// Remove ancient construction sites
-		if (Game.time % 10 == 0) {
-			const CONSTRUCTION_SITE_TIMEOUT = 50000;
+		if (Game.time % 20 == 0) {
+			const CONSTRUCTION_SITE_TIMEOUT = 100000;			// sites time out after this long
+			const UNBUILT_CONSTRUCTION_SITE_TIMEOUT = 1000;		// sites that haven't made any progress time out
 			// Add constructionSites to memory and remove really old ones
 			for (const id in Game.constructionSites) {
 				const site = Game.constructionSites[id];
 				if (!Memory.constructionSites[id]) {
 					Memory.constructionSites[id] = Game.time;
-				} else if (Game.time - Memory.constructionSites[id] > CONSTRUCTION_SITE_TIMEOUT) {
+				} else if (Game.time - Memory.constructionSites[id] >= CONSTRUCTION_SITE_TIMEOUT) {
+					site.remove();
+				} else if (site.progress == 0 &&
+						   Game.time - Memory.constructionSites[id] >= UNBUILT_CONSTRUCTION_SITE_TIMEOUT) {
 					site.remove();
 				}
 				// Remove duplicate construction sites that get placed on top of existing structures due to caching
@@ -330,18 +338,18 @@ export class Mem {
 				}
 			}
 
-			// Randomly clear weighted distances
-			for (const pos1Name in Memory.pathing.weightedDistances) {
-				if (_.isEmpty(Memory.pathing.weightedDistances[pos1Name])) {
-					delete Memory.pathing.weightedDistances[pos1Name];
-				} else {
-					for (const pos2Name in Memory.pathing.weightedDistances[pos1Name]) {
-						if (Math.random() < weightedDistanceCleanProbability) {
-							delete Memory.pathing.weightedDistances[pos1Name][pos2Name];
-						}
-					}
-				}
-			}
+			// // Randomly clear weighted distances
+			// for (const pos1Name in Memory.pathing.weightedDistances) {
+			// 	if (_.isEmpty(Memory.pathing.weightedDistances[pos1Name])) {
+			// 		delete Memory.pathing.weightedDistances[pos1Name];
+			// 	} else {
+			// 		for (const pos2Name in Memory.pathing.weightedDistances[pos1Name]) {
+			// 			if (Math.random() < weightedDistanceCleanProbability) {
+			// 				delete Memory.pathing.weightedDistances[pos1Name][pos2Name];
+			// 			}
+			// 		}
+			// 	}
+			// }
 		}
 	}
 

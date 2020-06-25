@@ -1,6 +1,5 @@
 import {log} from '../../console/log';
 import {Roles, Setups} from '../../creepSetups/setups';
-import {isStoreStructure} from '../../declarations/typeGuards';
 import {DirectiveHaul} from '../../directives/resource/haul';
 import {Energetics} from '../../logistics/Energetics';
 import {Pathing} from '../../movement/Pathing';
@@ -22,7 +21,7 @@ export class HaulingOverlord extends Overlord {
 	requiredRCL: 4;
 
 	constructor(directive: DirectiveHaul, priority = directive.hasDrops ? OverlordPriority.collectionUrgent.haul :
-													 OverlordPriority.collection.haul) {
+													 OverlordPriority.tasks.haul) {
 		super(directive, 'haul', priority);
 		this.directive = directive;
 		this.haulers = this.zerg(Roles.transport);
@@ -35,10 +34,10 @@ export class HaulingOverlord extends Overlord {
 		// Spawn a number of haulers sufficient to move all resources within a lifetime, up to a max
 		const MAX_HAULERS = 5;
 		// Calculate total needed amount of hauling power as (resource amount * trip distance)
-		const tripDistance = 2 * Pathing.distance((this.colony.storage || this.colony).pos, this.directive.pos);
+		const tripDistance = 2 * (Pathing.distance((this.colony.storage || this.colony).pos, this.directive.pos) || 0);
 		const haulingPowerNeeded = Math.min(this.directive.totalResources,
-										  this.colony.storage.storeCapacity
-										  - _.sum(this.colony.storage.store)) * tripDistance;
+											this.colony.storage.storeCapacity
+											- _.sum(this.colony.storage.store)) * tripDistance;
 		// Calculate amount of hauling each hauler provides in a lifetime
 		const haulerCarryParts = Setups.transporters.early.getBodyPotential(CARRY, this.colony);
 		const haulingPowerPerLifetime = CREEP_LIFE_TIME * haulerCarryParts * CARRY_CAPACITY;
@@ -55,7 +54,7 @@ export class HaulingOverlord extends Overlord {
 				// Pick up drops first
 				if (this.directive.hasDrops) {
 					const allDrops: Resource[] = _.flatten(_.values(this.directive.drops));
-					const drop = allDrops[0];
+					const drop = _.find(allDrops, drop => drop.resourceType != 'energy') || allDrops[0];
 					if (drop) {
 						hauler.task = Tasks.pickup(drop);
 						return;
@@ -63,19 +62,11 @@ export class HaulingOverlord extends Overlord {
 				}
 				// Withdraw from store structure
 				if (this.directive.storeStructure) {
-					let store: { [resourceType: string]: number } = {};
-					if (isStoreStructure(this.directive.storeStructure)) {
-						// log.info(`Is a store structure`);
-						store = this.directive.storeStructure.store;
-					} else {
-					// log.info(`Is not a store structure`);
-						store = {energy: this.directive.storeStructure.store.energy};
-					}
-					// Fill up properly - thanks MatthewARoy
+					const store = this.directive.store!;
 					let totalDrawn = 0; // Fill to full
 					for (const resourceType in store) {
 						if (store[resourceType] > 0) {
-							if (!!hauler.task) {
+							if (hauler.task) {
 								hauler.task = Tasks.withdraw(this.directive.storeStructure, <ResourceConstant>resourceType).fork(hauler.task);
 							} else {
 								hauler.task = Tasks.withdraw(this.directive.storeStructure, <ResourceConstant>resourceType);
@@ -88,45 +79,22 @@ export class HaulingOverlord extends Overlord {
 					}
 					if (hauler.task) {
 						// If can't fill up, just go ahead and go home
-						log.notify(`Can't finish filling up ${totalDrawn} ${JSON.stringify(hauler.task)} ${this.room}`);
+						// log.notify(`Can't finish filling up ${totalDrawn} ${JSON.stringify(hauler.task)} ${this.room}`);
 						return;
 					}
-
-				} else if (this.directive.ruinStoreStructure) {
-					const store: { [resourceType: string]: number } = this.directive.ruinStoreStructure.store;
-					// Fill up properly - thanks MatthewARoy
-					let totalDrawn = 0; // Fill to full
-					for (const resourceType in store) {
-						if (store[resourceType] > 0) {
-							if (!!hauler.task) {
-								hauler.task = Tasks.withdraw(this.directive.ruinStoreStructure, 
-											<ResourceConstant>resourceType).fork(hauler.task);
-							} else {
-								hauler.task = Tasks.withdraw(this.directive.ruinStoreStructure, <ResourceConstant>resourceType);
-							}
-							totalDrawn += store[resourceType];
-							if (totalDrawn >= hauler.carryCapacity) {
-								return;
-							}
-						}
-					}
-					if (hauler.task) {
-						log.notify(`Can't finish filling up ${totalDrawn} ${JSON.stringify(hauler.task)} ${this.room}`);
-						return;
-					}					
 				}
 				// Shouldn't reach here
 				log.warning(`${hauler.name} in ${hauler.room.print}: nothing to collect!`);
 			} else {
 				// hauler.task = Tasks.goTo(this.directive);
-				hauler.goTo(this.directive);
+				hauler.goTo(this.directive, {pathOpts: {avoidSK: true}});
 			}
 		} else {
 			// Travel to colony room and deposit resources
 			if (hauler.inSameRoomAs(this.colony)) {
 				// Put energy in storage and minerals in terminal if there is one
-				for (const resourceType in hauler.carry) {
-					if (hauler.carry[<ResourceConstant>resourceType] == 0) continue;
+				for (const [resourceType, amount] of hauler.carry.contents) {
+					if (amount == 0) continue;
 					if (resourceType == RESOURCE_ENERGY) { // prefer to put energy in storage
 						if (this.colony.storage && _.sum(this.colony.storage.store) < STORAGE_CAPACITY) {
 							hauler.task = Tasks.transfer(this.colony.storage, resourceType);
@@ -136,11 +104,12 @@ export class HaulingOverlord extends Overlord {
 							return;
 						}
 					} else { // prefer to put minerals in terminal
-						if (this.colony.terminal && _.sum(this.colony.terminal.store) < TERMINAL_CAPACITY) {
-							hauler.task = Tasks.transfer(this.colony.terminal, <ResourceConstant>resourceType);
+						if (this.colony.terminal && this.colony.terminal.my
+							&& _.sum(this.colony.terminal.store) < TERMINAL_CAPACITY) {
+							hauler.task = Tasks.transfer(this.colony.terminal, resourceType);
 							return;
 						} else if (this.colony.storage && _.sum(this.colony.storage.store) < STORAGE_CAPACITY) {
-							hauler.task = Tasks.transfer(this.colony.storage, <ResourceConstant>resourceType);
+							hauler.task = Tasks.transfer(this.colony.storage, resourceType);
 							return;
 						}
 					}
@@ -159,6 +128,10 @@ export class HaulingOverlord extends Overlord {
 				this.handleHauler(hauler);
 			}
 			hauler.run();
+		}
+		// TODO: fix the way this is done
+		if (this.directive.memory.totalResources == 0 && this.haulers.filter(hauler => _.sum(hauler.carry) > 0).length == 0) {
+			this.directive.remove();
 		}
 	}
 }

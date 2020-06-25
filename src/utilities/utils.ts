@@ -2,16 +2,45 @@
 
 import {alignedNewline, bullet} from './stringConstants';
 
-export function getAllColonyRooms(): Room[] {
-	return _.filter(_.values(Game.rooms), room => room.my);
+export function getAllRooms(): Room[] {
+	if (!Game._allRooms) {
+		Game._allRooms = _.values(Game.rooms); // this is cleared every tick
+	}
+	return Game._allRooms;
 }
 
-export function printRoomName(roomName: string): string {
-	return '<a href="#!/room/' + Game.shard.name + '/' + roomName + '">' + roomName + '</a>';
+export function getOwnedRooms(): Room[] {
+	if (!Game._ownedRooms) {
+		Game._ownedRooms = _.filter(getAllRooms(), room => room.my); // this is cleared every tick
+	}
+	return Game._ownedRooms;
+}
+
+export function canClaimAnotherRoom(): boolean {
+	return getOwnedRooms().length < Game.gcl.level;
+}
+
+export function printRoomName(roomName: string, aligned = false): string {
+	if (aligned) {
+		const msg = '<a href="#!/room/' + Game.shard.name + '/' + roomName + '">' + roomName + '</a>';
+		const extraSpaces = 'E12S34'.length - roomName.length;
+		return msg + ' '.repeat(extraSpaces);
+	} else {
+		return '<a href="#!/room/' + Game.shard.name + '/' + roomName + '">' + roomName + '</a>';
+	}
 }
 
 export function color(str: string, color: string): string {
 	return `<font color='${color}'>${str}</font>`;
+}
+
+function componentToHex(n: number): string {
+	const hex = n.toString(16);
+	return hex.length == 1 ? '0' + hex : hex;
+}
+
+export function rgbToHex(r: number, g: number, b: number): string {
+	return '#' + componentToHex(r) + componentToHex(g) + componentToHex(b);
 }
 
 /**
@@ -34,13 +63,22 @@ export function hasMinerals(store: { [resourceType: string]: number }): boolean 
 	return false;
 }
 
+export function hasContents(store: { [resourceType: string]: number }): boolean {
+	for (const resourceType in store) {
+		if ((store[<ResourceConstant>resourceType] || 0) > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 /**
  * Obtain the username of the player
  */
-export function getUsername(): string {
+export function getMyUsername(): string {
 	for (const i in Game.rooms) {
 		const room = Game.rooms[i];
-		if (room.controller && room.controller.my) {
+		if (room.controller && room.controller.owner && room.controller.my) {
 			return room.controller.owner.username;
 		}
 	}
@@ -54,12 +92,20 @@ export function getUsername(): string {
 	return 'ERROR: Could not determine username.';
 }
 
+export function isAlly(username: string): boolean {
+	return (Memory.settings.allies || []).includes(username);
+}
+
 export function hasJustSpawned(): boolean {
 	return _.keys(Overmind.colonies).length == 1 && _.keys(Game.creeps).length == 0 && _.keys(Game.spawns).length == 1;
 }
 
 export function onPublicServer(): boolean {
 	return Game.shard.name.includes('shard');
+}
+
+export function onBotArena(): boolean {
+	return Game.shard.name.toLowerCase() == 'botarena';
 }
 
 export function onTrainingEnvironment(): boolean {
@@ -133,25 +179,25 @@ export function mergeSum(objects: { [key: string]: number | undefined }[]): { [k
 	return ret;
 }
 
-export function coordName(coord: Coord): string {
-	return coord.x + ':' + coord.y;
-}
+// export function coordName(coord: Coord): string {
+// 	return coord.x + ':' + coord.y;
+// }
 
 const CHARCODE_A = 65;
 
 /**
  * Returns a compact two-character encoding of the coordinate
  */
-export function compactCoordName(coord: Coord): string {
-	return String.fromCharCode(CHARCODE_A + coord.x, CHARCODE_A + coord.y);
-}
+// export function compactCoordName(coord: Coord): string {
+// 	return String.fromCharCode(CHARCODE_A + coord.x, CHARCODE_A + coord.y);
+// }
+//
+// export function derefCoords(coordName: string, roomName: string): RoomPosition {
+// 	const [x, y] = coordName.split(':');
+// 	return new RoomPosition(parseInt(x, 10), parseInt(y, 10), roomName);
+// }
 
-export function derefCoords(coordName: string, roomName: string): RoomPosition {
-	const [x, y] = coordName.split(':');
-	return new RoomPosition(parseInt(x, 10), parseInt(y, 10), roomName);
-}
-
-export function getPosFromString(str: string | undefined | null): RoomPosition | undefined {
+export function posFromReadableName(str: string | undefined | null): RoomPosition | undefined {
 	if (!str) return;
 	const posName = _.first(str.match(/(E|W)\d+(N|S)\d+:\d+:\d+/g) || []);
 	if (posName) {
@@ -251,14 +297,18 @@ export function randomHex(length: number): string {
 /**
  * Compute an exponential moving average
  */
-export function exponentialMovingAverage(current: number, avg: number | undefined, window: number): number {
-	return (current + (avg || 0) * (window - 1)) / window;
+export function ema(current: number, avg: number | undefined, window: number, zeroThreshold = 1e-9): number {
+	let newAvg = (current + (avg || 0) * (window - 1)) / window;
+	if (zeroThreshold && Math.abs(newAvg) < zeroThreshold) {
+		newAvg = 0;
+	}
+	return newAvg;
 }
 
 /**
  * Compute an exponential moving average for unevenly spaced samples
  */
-export function irregularExponentialMovingAverage(current: number, avg: number, dt: number, window: number): number {
+export function irregularEma(current: number, avg: number, dt: number, window: number): number {
 	return (current * dt + avg * (window - dt)) / window;
 }
 
@@ -272,7 +322,7 @@ export function clone2DArray<T>(a: T[][]): T[][] {
 /**
  * Rotate a square matrix in place clockwise by 90 degrees
  */
-function rotateMatrix<T>(matrix: T[][]): void {
+export function rotateMatrix<T>(matrix: T[][]): void {
 	// reverse the rows
 	matrix.reverse();
 	// swap the symmetric elements
@@ -294,4 +344,11 @@ export function rotatedMatrix<T>(matrix: T[][], clockwiseTurns: 0 | 1 | 2 | 3): 
 		rotateMatrix(mat);
 	}
 	return mat;
+}
+
+/**
+ * Cyclically permute a list by n elements
+ */
+export function cyclicListPermutation<T>(list: T[], offset: number): T[] {
+	return list.slice(offset).concat(list.slice(0, offset));
 }

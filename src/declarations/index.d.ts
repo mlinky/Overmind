@@ -1,6 +1,19 @@
 declare const require: (module: string) => any;
 declare var global: any;
 
+declare const MARKET_FEE: 300; // missing in the typed-screeps declarations
+global.MARKET_FEE = MARKET_FEE;
+
+declare const NO_ACTION: 1;
+declare type NO_ACTION = NO_ACTION;
+global.NO_ACTION = NO_ACTION;
+
+type TickPhase = 'assimilating' | 'build' | 'refresh' | 'init' | 'run' | 'postRun';
+declare var PHASE: TickPhase;
+declare var LATEST_BUILD_TICK: number;
+declare var LATEST_GLOBAL_RESET_TICK: number;
+declare var LATEST_GLOBAL_RESET_DATE: Date;
+
 declare namespace NodeJS {
 	interface Global {
 
@@ -24,6 +37,12 @@ declare namespace NodeJS {
 	}
 }
 
+type Full<T> = {
+	[P in keyof T]-?: T[P];
+};
+
+type Omit<T, K extends keyof T> = Pick<T, Exclude<keyof T, K>>;
+
 // declare module 'screeps-profiler'; // I stopped using the typings for this because it was fucking up the Game typings
 
 declare module 'columnify';
@@ -31,8 +50,8 @@ declare module 'columnify';
 // If TS2451 gets thrown, change "declare let Game: Game;" to "declare var Game: Game;"
 // in typed-screeps index.d.ts file. (See issue #61 until the package is updated)
 interface Game {
-	// zerg: { [name: string]: any };
-	// directives: { [name: string]: any };
+	_allRooms?: Room[];
+	_ownedRooms?: Room[];
 }
 
 
@@ -69,10 +88,10 @@ interface IExpansionPlanner {
 
 }
 
-interface IOvermindMemory {
-	terminalNetwork: any;
-	versionUpdater: any;
-}
+// interface IOvermindMemory {
+// 	terminalNetwork: any;
+// 	versionUpdater: any;
+// }
 
 declare const Assimilator: IAssimilator;
 
@@ -99,6 +118,7 @@ interface IOvermind {
 	overseer: IOverseer;						// is actually Overseer
 	directives: { [flagName: string]: any }; 	// is actually { [flagName: string]: Directive }
 	zerg: { [creepName: string]: any };			// is actually { [creepName: string]: Zerg }
+	powerZerg: { [creepName: string]: any };	// is actually { [creepName: string]: PowerZerg }
 	colonies: { [roomName: string]: any }; 		// is actually { [roomName: string]: Colony }
 	overlords: { [ref: string]: any }; 			// is actually { [ref: string]: Overlord }
 	spawnGroups: { [ref: string]: any };		// is actually { [ref: string]: SpawnGroup }
@@ -138,15 +158,15 @@ interface IOverseer {
 
 	removeDirective(directive: any): void;
 
+	getDirectivesOfType(directiveName: string): any[];
+
+	getDirectivesInRoom(roomName: string): any[];
+
+	getDirectivesForColony(colony: {name: string}): any[];
+
 	registerOverlord(overlord: any): void;
 
 	getOverlordsForColony(colony: any): any[];
-
-	isOverlordSuspended(overlord: any): boolean;
-
-	suspendOverlordFor(overlord: any, ticks: number): void;
-
-	suspendOverlordUntil(overlord: any, untilTick: number): void;
 
 	init(): void;
 
@@ -158,28 +178,49 @@ interface IOverseer {
 }
 
 
-interface TerminalState {
-	name: string;
-	type: 'in' | 'out' | 'in/out';
-	amounts: { [resourceType: string]: number };
+// interface TerminalState {
+// 	name: string;
+// 	type: 'in' | 'out' | 'in/out';
+// 	amounts: { [resourceType: string]: number };
+// 	tolerance: number;
+// }
+
+interface Thresholds {
+	target: number;
+	surplus: number | undefined;
 	tolerance: number;
 }
 
 interface ITerminalNetwork {
-	allTerminals: StructureTerminal[];
-	readyTerminals: StructureTerminal[];
-	// terminals: StructureTerminal[];
-	memory: any;
+
+	addColony(colony: IColony): void;
 
 	refresh(): void;
 
-	requestResource(terminal: StructureTerminal, resourceType: ResourceConstant, amount: number): void;
+	getAssets(): { [resourceType: string]: number };
 
-	registerTerminalState(terminal: StructureTerminal, state: TerminalState): void;
+	thresholds(colony: IColony, resource: ResourceConstant): Thresholds;
+
+	canObtainResource(requestor: IColony, resource: ResourceConstant, totalAmount: number): boolean;
+
+	requestResource(requestor: IColony, resource: ResourceConstant, totalAmount: number, tolerance?: number): void;
+
+	lockResource(requestor: IColony, resource: ResourceConstant, lockedAmount: number): void;
+
+	exportResource(provider: IColony, resource: ResourceConstant, thresholds?: Thresholds): void;
 
 	init(): void;
 
 	run(): void;
+}
+
+
+interface TradeOpts {
+	preferDirect?: boolean;			// true if you prefer to sell directly via a .deal() call
+	flexibleAmount?: boolean;		// true if you're okay filling the transaction with several smaller transactions
+	ignoreMinAmounts?: boolean;		// true if you want to ignore quantity checks (e.g. T5 commodities in small amounts)
+	ignorePriceChecksForDirect?: boolean; 	// true if you want to bypass price sanity checks when .deal'ing
+	dryRun?: boolean; 				// don't actually execute the trade, just check to see if you can make it
 }
 
 interface ITradeNetwork {
@@ -187,20 +228,15 @@ interface ITradeNetwork {
 
 	refresh(): void;
 
-	priceOf(mineralType: ResourceConstant): number;
+	getExistingOrders(type: ORDER_BUY | ORDER_SELL, resource: ResourceConstant | 'any', roomName?: string): Order[];
 
-	lookForGoodDeals(terminal: StructureTerminal, mineral: string, margin?: number): void;
+	priceOf(resource: ResourceConstant): number;
 
-	sellDirectly(terminal: StructureTerminal, resource: ResourceConstant, amount?: number,
-				 flexibleAmount?: boolean): number | undefined;
+	ordersProcessedThisTick(): boolean;
 
-	sell(terminal: StructureTerminal, resource: ResourceConstant, amount: number,
-		 maxOrdersOfType?: number): number | undefined;
+	buy(terminal: StructureTerminal, resource: ResourceConstant, amount: number, opts?: TradeOpts): number;
 
-	buy(terminal: StructureTerminal, mineralType: ResourceConstant, amount: number): void;
-
-	maintainBuyOrder(terminal: StructureTerminal, resource: ResourceConstant, amount: number,
-					 maxOrdersOfType?: number): void;
+	sell(terminal: StructureTerminal, resource: ResourceConstant, amount: number, opts?: TradeOpts): number;
 
 	init(): void;
 
@@ -210,6 +246,8 @@ interface ITradeNetwork {
 declare var Overmind: IOvermind;
 
 declare var _cache: IGlobalCache;
+
+declare var PERMACACHE: { [key: string]: any };
 
 declare function print(...args: any[]): void;
 
@@ -262,8 +300,36 @@ interface HasRef {
 }
 
 interface HasID {
-	id: string;
+	id: Id;
 }
+
+type AnyStoreStructure =
+	StructureContainer
+	| StructureExtension
+	| StructureFactory
+	| StructureLab
+	| StructureLink
+	| StructureNuker
+	| StructurePowerSpawn
+	| StructureSpawn
+	| StructureStorage
+	| StructureTerminal
+	| StructureTower
+	| Ruin
+	| Tombstone;
+
+type TransferrableStoreStructure =
+	StructureContainer
+	| StructureExtension
+	| StructureFactory
+	| StructureLab
+	| StructureLink
+	| StructureNuker
+	| StructurePowerSpawn
+	| StructureSpawn
+	| StructureStorage
+	| StructureTerminal
+	| StructureTower;
 
 // interface StoreLike {
 // 	[resourceType: string]: number

@@ -2,13 +2,14 @@
 
 import {Colony} from '../Colony';
 import {log} from '../console/log';
-import {isOwnedStructure, isStructure, isZerg} from '../declarations/typeGuards';
+import {isCreep, isOwnedStructure, isStandardZerg, isStructure} from '../declarations/typeGuards';
 import {Directive} from '../directives/Directive';
 import {Mem} from '../memory/Memory';
 import {Pathing} from '../movement/Pathing';
 import {profile} from '../profiler/decorator';
-import {boostResources} from '../resources/map_resources';
+import {BOOST_TIERS} from '../resources/map_resources';
 import {Cartographer} from '../utilities/Cartographer';
+import {Visualizer} from '../visuals/Visualizer';
 import {toCreep, Zerg} from '../zerg/Zerg';
 import {RoomIntel} from './RoomIntel';
 
@@ -19,10 +20,17 @@ interface CombatIntelMemory {
 	};
 }
 
+const getDefaultCombatIntelMemory: () => CombatIntelMemory = () => ({
+	cache: {
+		tick: Game.time,
+	}
+});
+
 export interface CombatPotentials {
 	attack: number;
-	rangedAttack: number;
+	ranged: number;
 	heal: number;
+	dismantle?: number;
 }
 
 
@@ -36,7 +44,7 @@ export class CombatIntel {
 	}
 
 	get memory(): CombatIntelMemory {
-		return Mem.wrap(this.directive.memory, 'combatIntel', {});
+		return Mem.wrap(this.directive.memory, 'combatIntel', getDefaultCombatIntelMemory);
 	}
 
 	get room(): Room | undefined {
@@ -62,13 +70,14 @@ export class CombatIntel {
 	}
 
 	/**
-	 * Total tower tamage from all towers in room at a given position
+	 * Total tower damage from all towers in room at a given position
+	 * TODO needs to address stronghold
 	 */
 	static towerDamageAtPos(pos: RoomPosition, ignoreEnergy = false): number {
 		if (pos.room) {
 			let expectedDamage = 0;
 			for (const tower of pos.room.towers) {
-				if (tower.energy > 0 || ignoreEnergy) {
+				if ((tower.energy > 0 || ignoreEnergy)) {
 					expectedDamage += this.singleTowerDamage(pos.getRangeTo(tower));
 				}
 			}
@@ -91,6 +100,73 @@ export class CombatIntel {
 					matrix.set(barrier.pos.x, barrier.pos.y, Math.ceil(barrier.hits * 10 / highestHits) * 10);
 				}
 			}
+			return matrix;
+		}
+	}
+
+
+	/**
+	 * Calculates the total potential damage per tile in a region
+	 */
+	static computeCreepDamagePotentialMatrix(room: Room, creeps: Creep[],
+											 startingMatrix?: CostMatrix): CostMatrix | undefined {
+		if (room) {
+			const cpuUsed = Game.cpu.getUsed();
+			const matrix = startingMatrix || new PathFinder.CostMatrix();
+
+			// const otherMatrix = new Array(50);
+			// otherMatrix.forEach((loc, index) => otherMatrix[index] = new Array(50));
+
+
+			creeps.forEach(creep => {
+				const meleeAttack = CombatIntel.getAttackPotential(creep);
+				const rangedAttack = CombatIntel.getRangedAttackPotential(creep);
+				// const heal = CombatIntel.getHealPotential(creep);
+				if (meleeAttack > 0) {
+					creep.pos.neighbors.forEach(pos =>
+													matrix.set(pos.x, pos.y, matrix.get(pos.x, pos.y) + meleeAttack * ATTACK_POWER / 100));
+				}
+				if (rangedAttack > 0) {
+					creep.pos.getPositionsInRange(3).forEach(pos =>
+																 matrix.set(pos.x, pos.y, matrix.get(pos.x, pos.y) + rangedAttack * RANGED_ATTACK_POWER / 100));
+				}
+			});
+
+			Visualizer.displayCostMatrix(matrix, room.name);
+			console.log(`Cost matrix cpu used in ${room.print} = ${(Game.cpu.getUsed() - cpuUsed)}`);
+			return matrix;
+		}
+	}
+
+	/**
+	 * Calculates potential damage and heal per location in a region
+	 */
+	static computeTotalCreepPotentialMatrix(room: Room, creeps: Creep[],
+											startingMatrix?: CostMatrix): CostMatrix | undefined {
+		if (room) {
+			const cpuUsed = Game.cpu.getUsed();
+			const matrix = startingMatrix || new PathFinder.CostMatrix();
+
+			// const otherMatrix = new Array(50);
+			// otherMatrix.forEach((loc, index) => otherMatrix[index] = new Array(50));
+
+
+			creeps.forEach(creep => {
+				const meleeAttack = CombatIntel.getAttackPotential(creep);
+				const rangedAttack = CombatIntel.getRangedAttackPotential(creep);
+				// const heal = CombatIntel.getHealPotential(creep);
+				if (meleeAttack > 0) {
+					creep.pos.neighbors.forEach(pos =>
+													matrix.set(pos.x, pos.y, matrix.get(pos.x, pos.y) + meleeAttack * ATTACK_POWER / 100));
+				}
+				if (rangedAttack > 0) {
+					creep.pos.getPositionsInRange(3).forEach(pos =>
+																 matrix.set(pos.x, pos.y, matrix.get(pos.x, pos.y) + rangedAttack * RANGED_ATTACK_POWER / 100));
+				}
+			});
+
+			Visualizer.displayCostMatrix(matrix, room.name);
+			console.log(`Cost matrix cpu used in ${room.print} = ${(Game.cpu.getUsed() - cpuUsed)}`);
 			return matrix;
 		}
 	}
@@ -130,7 +206,6 @@ export class CombatIntel {
 			}
 		}
 
-		// TODO
 		const exitPositions: RoomPosition[] = [];
 		const terrain = Game.map.getRoomTerrain(this.room.name);
 
@@ -207,19 +282,17 @@ export class CombatIntel {
 	findSwarmAssemblyPoint(clearance: { width: number, height: number }, swarmIndex = 0): RoomPosition {
 		const simpleFallback = this.findSimpleSiegeFallback();
 		const startPos = Pathing.findPathablePosition(simpleFallback.roomName, clearance);
-		let ret = Pathing.findSwarmPath(startPos, this.directive.pos, clearance.width, clearance.height,
-										{ignoreCreeps: true});
+		let ret = Pathing.findSwarmPath(startPos, this.directive.pos, clearance.width, clearance.height);
 		if (ret.incomplete) {
 			log.debug(`Incomplete swarm path to find assembly point. Retrying with startpos = fallback.`);
-			ret = Pathing.findSwarmPath(simpleFallback, this.directive.pos, clearance.width, clearance.height,
-										{ignoreCreeps: true});
+			ret = Pathing.findSwarmPath(simpleFallback, this.directive.pos, clearance.width, clearance.height);
 			if (ret.incomplete) {
 				log.warning(`No pathable assembly point!`);
 			}
 		}
 		const path = ret.path.reverse();
 		const acceptablePositions = _.filter(path, pos => pos.roomName == simpleFallback.roomName &&
-														pos.rangeToEdge > 1);
+														  pos.rangeToEdge > 1);
 		const swarmSize = Math.max(clearance.width, clearance.height);
 		const posIndex = (swarmSize + 1) * swarmIndex;
 		return acceptablePositions[posIndex] || acceptablePositions[0] || simpleFallback;
@@ -231,7 +304,7 @@ export class CombatIntel {
 	findSwarmAssemblyPointInColony(clearance: { width: number, height: number }, swarmIndex = 0): RoomPosition {
 		// let ret = Pathing.findSwarmPath(this.colony.pos, this.directive.pos, clearance.width, clearance.height,
 		// 								{ignoreCreeps: true});
-		const ret = Pathing.findPath(this.colony.pos, this.directive.pos, {ignoreCreeps: true});
+		const ret = Pathing.findPath(this.colony.pos, this.directive.pos);
 		const path = ret.path.reverse();
 		const acceptablePositions = _.filter(path, pos => pos.roomName == this.colony.name && pos.rangeToEdge > 1);
 		const swarmSize = Math.max(clearance.width, clearance.height);
@@ -284,23 +357,36 @@ export class CombatIntel {
 		return creep.intel[key];
 	}
 
+	static uniqueBoosts(creep: Creep): ResourceConstant[] {
+		return _.compact(_.unique(_.map(creep.body, bodyPart => bodyPart.boost))) as ResourceConstant[];
+	}
+
 	/**
 	 * Heal potential of a single creep in units of effective number of parts
 	 */
-	static getHealPotential(creep: Creep): number {
+	static getHealPotential(creep: Creep, countIntendedBoosts = false): number {
 		return this.cache(creep, 'healPotential', () =>
 			_.sum(creep.body, function(part) {
 				if (part.hits == 0) {
 					return 0;
 				}
 				if (part.type == HEAL) {
-					if (!part.boost) {
+					let boost = part.boost as ResourceConstant | undefined;
+					if (!boost && countIntendedBoosts && creep.my) {
+						if (creep.memory.needBoosts) {
+							boost = _.find(creep.memory.needBoosts,
+										   boost => boost == BOOST_TIERS.heal.T1 ||
+													boost == BOOST_TIERS.heal.T2 ||
+													boost == BOOST_TIERS.heal.T3);
+						}
+					}
+					if (!boost) {
 						return 1;
-					} else if (part.boost == boostResources.heal[1]) {
+					} else if (boost == BOOST_TIERS.heal.T1) {
 						return BOOSTS.heal.LO.heal;
-					} else if (part.boost == boostResources.heal[2]) {
+					} else if (boost == BOOST_TIERS.heal.T2) {
 						return BOOSTS.heal.LHO2.heal;
-					} else if (part.boost == boostResources.heal[3]) {
+					} else if (boost == BOOST_TIERS.heal.T3) {
 						return BOOSTS.heal.XLHO2.heal;
 					}
 				}
@@ -331,19 +417,28 @@ export class CombatIntel {
 	/**
 	 * Attack potential of a single creep in units of effective number of parts
 	 */
-	static getAttackPotential(creep: Creep): number {
+	static getAttackPotential(creep: Creep, countIntendedBoosts = false): number {
 		return this.cache(creep, 'attackPotential', () => _.sum(creep.body, function(part) {
 			if (part.hits == 0) {
 				return 0;
 			}
 			if (part.type == ATTACK) {
-				if (!part.boost) {
+				let boost = part.boost as ResourceConstant | undefined;
+				if (!boost && countIntendedBoosts && creep.my) {
+					if (creep.memory.needBoosts) {
+						boost = _.find(creep.memory.needBoosts,
+									   boost => boost == BOOST_TIERS.attack.T1 ||
+												boost == BOOST_TIERS.attack.T2 ||
+												boost == BOOST_TIERS.attack.T3);
+					}
+				}
+				if (!boost) {
 					return 1;
-				} else if (part.boost == boostResources.attack[1]) {
+				} else if (boost == BOOST_TIERS.attack.T1) {
 					return BOOSTS.attack.UH.attack;
-				} else if (part.boost == boostResources.attack[2]) {
+				} else if (boost == BOOST_TIERS.attack.T2) {
 					return BOOSTS.attack.UH2O.attack;
-				} else if (part.boost == boostResources.attack[3]) {
+				} else if (boost == BOOST_TIERS.attack.T3) {
 					return BOOSTS.attack.XUH2O.attack;
 				}
 			}
@@ -358,20 +453,29 @@ export class CombatIntel {
 	/**
 	 * Ranged attack potential of a single creep in units of effective number of parts
 	 */
-	static getRangedAttackPotential(creep: Creep): number {
+	static getRangedAttackPotential(creep: Creep, countIntendedBoosts = false): number {
 		return this.cache(creep, 'rangedAttackPotential', () =>
 			_.sum(creep.body, function(part) {
 				if (part.hits == 0) {
 					return 0;
 				}
 				if (part.type == RANGED_ATTACK) {
-					if (!part.boost) {
+					let boost = part.boost as ResourceConstant | undefined;
+					if (!boost && countIntendedBoosts && creep.my) {
+						if (creep.memory.needBoosts) {
+							boost = _.find(creep.memory.needBoosts,
+										   boost => boost == BOOST_TIERS.ranged.T1 ||
+													boost == BOOST_TIERS.ranged.T2 ||
+													boost == BOOST_TIERS.ranged.T3);
+						}
+					}
+					if (!boost) {
 						return 1;
-					} else if (part.boost == boostResources.ranged_attack[1]) {
+					} else if (boost == BOOST_TIERS.ranged.T1) {
 						return BOOSTS.ranged_attack.KO.rangedAttack;
-					} else if (part.boost == boostResources.ranged_attack[2]) {
+					} else if (boost == BOOST_TIERS.ranged.T2) {
 						return BOOSTS.ranged_attack.KHO2.rangedAttack;
-					} else if (part.boost == boostResources.ranged_attack[3]) {
+					} else if (boost == BOOST_TIERS.ranged.T3) {
 						return BOOSTS.ranged_attack.XKHO2.rangedAttack;
 					}
 				}
@@ -387,19 +491,28 @@ export class CombatIntel {
 	/**
 	 * Attack potential of a single creep in units of effective number of parts
 	 */
-	static getDismantlePotential(creep: Creep): number {
+	static getDismantlePotential(creep: Creep, countIntendedBoosts = false): number {
 		return this.cache(creep, 'dismantlePotential', () => _.sum(creep.body, function(part) {
 			if (part.hits == 0) {
 				return 0;
 			}
 			if (part.type == WORK) {
-				if (!part.boost) {
+				let boost = part.boost as ResourceConstant | undefined;
+				if (!boost && countIntendedBoosts && creep.my) {
+					if (creep.memory.needBoosts) {
+						boost = _.find(creep.memory.needBoosts,
+									   boost => boost == BOOST_TIERS.dismantle.T1 ||
+												boost == BOOST_TIERS.dismantle.T2 ||
+												boost == BOOST_TIERS.dismantle.T3);
+					}
+				}
+				if (!boost) {
 					return 1;
-				} else if (part.boost == boostResources.dismantle[1]) {
+				} else if (boost == BOOST_TIERS.dismantle.T1) {
 					return BOOSTS.work.ZH.dismantle;
-				} else if (part.boost == boostResources.dismantle[2]) {
+				} else if (boost == BOOST_TIERS.dismantle.T2) {
 					return BOOSTS.work.ZH2O.dismantle;
-				} else if (part.boost == boostResources.dismantle[3]) {
+				} else if (boost == BOOST_TIERS.dismantle.T3) {
 					return BOOSTS.work.XZH2O.dismantle;
 				}
 			}
@@ -411,6 +524,71 @@ export class CombatIntel {
 		return DISMANTLE_POWER * this.getDismantlePotential(toCreep(creep));
 	}
 
+	static getRepairPotential(creep: Creep, countIntendedBoosts = false): number {
+		return this.cache(creep, 'repairPotential', () => _.sum(creep.body, function(part) {
+			if (part.hits == 0) {
+				return 0;
+			}
+			if (part.type == WORK) {
+				let boost = part.boost as ResourceConstant | undefined;
+				if (!boost && countIntendedBoosts && creep.my) {
+					if (creep.memory.needBoosts) {
+						boost = _.find(creep.memory.needBoosts,
+									   boost => boost == BOOST_TIERS.construct.T1 ||
+												boost == BOOST_TIERS.construct.T2 ||
+												boost == BOOST_TIERS.construct.T3);
+					}
+				}
+				if (!boost) {
+					return 1;
+				} else if (boost == BOOST_TIERS.construct.T1) {
+					return BOOSTS.work.LH.repair;
+				} else if (boost == BOOST_TIERS.construct.T2) {
+					return BOOSTS.work.LH2O.repair;
+				} else if (boost == BOOST_TIERS.construct.T3) {
+					return BOOSTS.work.XLH2O.repair;
+				}
+			}
+			return 0;
+		}));
+	}
+
+	static getRepairPower(creep: Creep | Zerg): number {
+		return REPAIR_POWER * this.getRepairPotential(toCreep(creep));
+	}
+
+	/**
+	 * Attack potential of a single creep in units of effective number of parts
+	 */
+	static getCarryPotential(creep: Creep, countIntendedBoosts = false): number {
+		return this.cache(creep, 'carryPotential', () => _.sum(creep.body, function(part) {
+			if (part.hits == 0) {
+				return 0;
+			}
+			if (part.type == CARRY) {
+				let boost = part.boost as ResourceConstant | undefined;
+				if (!boost && countIntendedBoosts && creep.my) {
+					if (creep.memory.needBoosts) {
+						boost = _.find(creep.memory.needBoosts,
+									   boost => boost == BOOST_TIERS.carry.T1 ||
+												boost == BOOST_TIERS.carry.T2 ||
+												boost == BOOST_TIERS.carry.T3);
+					}
+				}
+				if (!boost) {
+					return 1;
+				} else if (boost == BOOST_TIERS.carry.T1) {
+					return BOOSTS.carry.KH.capacity;
+				} else if (boost == BOOST_TIERS.carry.T2) {
+					return BOOSTS.carry.KH2O.capacity;
+				} else if (boost == BOOST_TIERS.carry.T3) {
+					return BOOSTS.carry.XKH2O.capacity;
+				}
+			}
+			return 0;
+		}));
+	}
+
 	/**
 	 * Minimum damage multiplier a creep has
 	 */
@@ -418,11 +596,11 @@ export class CombatIntel {
 		return this.cache(creep, 'minDamageMultiplier', () =>
 			_.min(_.map(creep.body, function(part) {
 				if (part.type == TOUGH && part.hits > 0) {
-					if (part.boost == boostResources.tough[1]) {
+					if (part.boost == BOOST_TIERS.tough.T1) {
 						return BOOSTS.tough.GO.damage;
-					} else if (part.boost == boostResources.tough[2]) {
+					} else if (part.boost == BOOST_TIERS.tough.T2) {
 						return BOOSTS.tough.GHO2.damage;
-					} else if (part.boost == boostResources.tough[3]) {
+					} else if (part.boost == BOOST_TIERS.tough.T3) {
 						return BOOSTS.tough.XGHO2.damage;
 					}
 				}
@@ -435,7 +613,7 @@ export class CombatIntel {
 		return _.min(_.map(creeps, creep => this.minimumDamageTakenMultiplier(creep)));
 	}
 
-	static getMassAttackDamageTo(attacker: Creep | Zerg, target: Creep | Structure): number {
+	static getMassAttackDamageTo(attacker: Creep | Zerg, target: AnyCreep | Structure): number {
 		if (isStructure(target) && (!isOwnedStructure(target) || target.my)) {
 			return 0;
 		}
@@ -448,7 +626,7 @@ export class CombatIntel {
 		} else if (range == 3) {
 			rangedMassAttackPower = 1;
 		}
-		return rangedMassAttackPower * this.getRangedAttackPotential(isZerg(attacker) ? attacker.creep : attacker);
+		return rangedMassAttackPower * this.getRangedAttackPotential(isStandardZerg(attacker) ? attacker.creep : attacker);
 	}
 
 	/**
@@ -502,7 +680,19 @@ export class CombatIntel {
 		const attack = _.sum(creeps, creep => this.getAttackPotential(creep));
 		const rangedAttack = _.sum(creeps, creep => this.getRangedAttackPotential(creep));
 		const heal = _.sum(creeps, creep => this.getHealPotential(creep));
-		return {attack, rangedAttack, heal};
+		const dismantle = _.sum(creeps, creep => this.getDismantlePotential(creep));
+		return {attack, ranged: rangedAttack, heal, dismantle};
+	}
+
+	/**
+	 * Total attack/rangedAttack/heal potentials for a group of creeps
+	 */
+	static getMyCombatPotentials(zergs: Zerg[], countIntendedBoosts = true): CombatPotentials {
+		const attack = _.sum(zergs, zerg => this.getAttackPotential(zerg.creep, countIntendedBoosts));
+		const rangedAttack = _.sum(zergs, zerg => this.getRangedAttackPotential(zerg.creep, countIntendedBoosts));
+		const heal = _.sum(zergs, zerg => this.getHealPotential(zerg.creep, countIntendedBoosts));
+		const dismantle = _.sum(zergs, zerg => this.getDismantlePotential(zerg.creep, countIntendedBoosts));
+		return {attack, ranged: rangedAttack, heal, dismantle};
 	}
 
 	/**
@@ -532,7 +722,7 @@ export class CombatIntel {
 			const neighbors = _.filter(creep.room.hostiles, hostile => hostile.pos.isNearTo(creep));
 			const neighborHealing = _.sum(neighbors, neighbor => this.getHealAmount(neighbor));
 			const rangedHealers = _.filter(creep.room.hostiles, hostile => hostile.pos.getRangeTo(creep) <= 3 &&
-																		 !neighbors.includes(hostile));
+																		   !neighbors.includes(hostile));
 			const rangedHealing = _.sum(rangedHealers, healer => this.getRangedHealAmount(healer));
 			return selfHealing + neighborHealing + rangedHealing;
 		});
@@ -555,7 +745,7 @@ export class CombatIntel {
 			const neighbors = _.filter(creep.room.creeps, hostile => hostile.pos.isNearTo(creep));
 			const neighborHealing = _.sum(neighbors, neighbor => this.getHealAmount(neighbor));
 			const rangedHealers = _.filter(creep.room.creeps, hostile => hostile.pos.getRangeTo(creep) <= 3 &&
-																	   !neighbors.includes(hostile));
+																		 !neighbors.includes(hostile));
 			const rangedHealing = _.sum(rangedHealers, healer => this.getHealAmount(healer));
 			return selfHealing + neighborHealing + rangedHealing;
 		});
@@ -565,7 +755,7 @@ export class CombatIntel {
 	 * Determine the predicted damage amount of a certain type of attack. Can specify if you should use predicted or
 	 * current hits amount and whether to include predicted healing. Does not update predicted hits.
 	 */
-	static predictedDamageAmount(attacker: Creep | Zerg, target: Creep, attackType: 'attack' | 'rangedAttack',
+	static predictedDamageAmount(attacker: Creep | Zerg, target: AnyCreep, attackType: 'attack' | 'rangedAttack',
 								 useHitsPredicted = true): number {
 		// Compute initial (gross) damage amount
 		let grossDamage: number;
@@ -578,14 +768,20 @@ export class CombatIntel {
 		}
 		// Adjust for remaining tough parts
 		let toughHits: number;
-		if (useHitsPredicted) {
-			if (target.hitsPredicted == undefined) target.hitsPredicted = target.hits;
-			const nonToughHits = _.sum(target.body, part => part.type == TOUGH ? 0 : part.hits);
-			toughHits = Math.min(target.hitsPredicted - nonToughHits, 0); // predicted amount of TOUGH
+		let damageMultiplier: number;
+		if (isCreep(target)) {
+			if (useHitsPredicted) {
+				if (target.hitsPredicted == undefined) target.hitsPredicted = target.hits;
+				const nonToughHits = _.sum(target.body, part => part.type == TOUGH ? 0 : part.hits);
+				toughHits = Math.min(target.hitsPredicted - nonToughHits, 0); // predicted amount of TOUGH
+			} else {
+				toughHits = 100 * target.getActiveBodyparts(TOUGH);
+			}
+			damageMultiplier = this.minimumDamageTakenMultiplier(target); // assumes only 1 tier of boosts
 		} else {
-			toughHits = 100 * target.getActiveBodyparts(TOUGH);
+			toughHits = 0;
+			damageMultiplier = 1;
 		}
-		const damageMultiplier = this.minimumDamageTakenMultiplier(target); // assumes only 1 tier of boosts
 		if (grossDamage * damageMultiplier < toughHits) { // if you can't eat through armor
 			return grossDamage * damageMultiplier;
 		} else { // if you break tough shield
@@ -619,31 +815,34 @@ export class CombatIntel {
 	 * This method is probably expensive; use sparingly
 	 */
 	static isEdgeDancing(creep: Creep, reentryThreshold = 3): boolean {
-		if (!creep.room.my) {
-			log.warning(`isEdgeDancing should only be called in owned rooms!`);
-		}
-		const creepOccupancies = creep.room.memory[_RM.CREEPS_IN_ROOM];
-		if (creepOccupancies) {
-			// Look to see if the creep has exited and re-entered the room a given number of times
-			const creepInRoomTicks = [];
-			for (const tick in creepOccupancies) {
-				if (creepOccupancies[tick].includes(creep.name)) {
-					creepInRoomTicks.push(parseInt(tick, 10));
-				}
-			}
-			let reentries = 1;
-			if (creepInRoomTicks.length > 0) {
-				for (const i of _.range(creepInRoomTicks.length - 1)) {
-					if (creepInRoomTicks[i + 1] != creepInRoomTicks[i] + 1) {
-						// There was a gap between the creep's presence in the room so it must have reentered
-						reentries++;
-					}
-				}
-			}
-			return reentries >= reentryThreshold;
-		} else {
-			return false;
-		}
+		return false;
+		// TODO: rewrite this
+
+		// if (!creep.room.my) {
+		// 	log.warning(`isEdgeDancing should only be called in owned rooms!`);
+		// }
+		// const creepOccupancies = creep.room.memory[RMEM.CREEPS_IN_ROOM];
+		// if (creepOccupancies) {
+		// 	// Look to see if the creep has exited and re-entered the room a given number of times
+		// 	const creepInRoomTicks = [];
+		// 	for (const tick in creepOccupancies) {
+		// 		if (creepOccupancies[tick].includes(creep.name)) {
+		// 			creepInRoomTicks.push(parseInt(tick, 10));
+		// 		}
+		// 	}
+		// 	let reentries = 1;
+		// 	if (creepInRoomTicks.length > 0) {
+		// 		for (const i of _.range(creepInRoomTicks.length - 1)) {
+		// 			if (creepInRoomTicks[i + 1] != creepInRoomTicks[i] + 1) {
+		// 				// There was a gap between the creep's presence in the room so it must have reentered
+		// 				reentries++;
+		// 			}
+		// 		}
+		// 	}
+		// 	return reentries >= reentryThreshold;
+		// } else {
+		// 	return false;
+		// }
 	}
 
 	static getPositionsNearEnemies(hostiles: Creep[], range = 0): RoomPosition[] {
@@ -652,3 +851,6 @@ export class CombatIntel {
 	}
 
 }
+
+// For debugging
+global.CombatIntel = CombatIntel;

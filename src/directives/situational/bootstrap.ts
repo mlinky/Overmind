@@ -29,10 +29,11 @@ export class DirectiveBootstrap extends Directive {
 
 	refresh() {
 		super.refresh();
-		this.colony.bootstrapping = true;
+		this.colony.state.bootstrapping = true;
 		this.needsMiner = (this.colony.getCreepsByRole(Roles.drone).length == 0);
 		this.needsManager = (this.colony.commandCenter != undefined &&
 							 this.colony.commandCenter.overlord != undefined &&
+							 this.colony.commandCenter.link != undefined &&
 							 this.colony.getCreepsByRole(Roles.manager).length == 0);
 		this.needsQueen = (this.colony.getCreepsByRole(Roles.queen).length == 0);
 	}
@@ -49,7 +50,10 @@ export class DirectiveBootstrap extends Directive {
 	}
 
 	run(): void {
-		if (!this.needsQueen && !this.needsMiner && !this.needsManager) {
+		if (!this.needsQueen && !this.needsMiner) {
+			if (this.colony.storage && this.colony.assets.energy < 5000) {
+				return; // wait a little while at higher levels before stopping bootstrapping
+			}
 			log.alert(`Colony ${this.room.print} has recovered from crash; removing bootstrap directive.`);
 			// Suicide any fillers so they don't get in the way
 			const overlord = this.overlords.bootstrap as BootstrappingOverlord;

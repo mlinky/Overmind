@@ -2,7 +2,6 @@ import {Roles, Setups} from '../../creepSetups/setups';
 import {UpgradeSite} from '../../hiveClusters/upgradeSite';
 import {OverlordPriority} from '../../priorities/priorities_overlords';
 import {profile} from '../../profiler/decorator';
-import {boostResources} from '../../resources/map_resources';
 import {Tasks} from '../../tasks/Tasks';
 import {Zerg} from '../../zerg/Zerg';
 import {Overlord} from '../Overlord';
@@ -22,18 +21,25 @@ export class UpgradingOverlord extends Overlord {
 	constructor(upgradeSite: UpgradeSite, priority = OverlordPriority.upgrading.upgrade) {
 		super(upgradeSite, 'upgrade', priority);
 		this.upgradeSite = upgradeSite;
-		this.upgraders = this.zerg(Roles.upgrader, {
-			boostWishlist: [boostResources.upgrade[3]]
-		});
+		// If new colony or boosts overflowing to storage
+		this.upgraders = this.zerg(Roles.upgrader);
 	}
 
 	init() {
 		if (this.colony.level < 3) { // can't spawn upgraders at early levels
 			return;
 		}
-		if (this.colony.assets[RESOURCE_ENERGY] > UpgradeSite.settings.energyBuffer
+		if (this.colony.assets.energy > UpgradeSite.settings.energyBuffer
 			|| this.upgradeSite.controller.ticksToDowngrade < 500) {
-			const setup = this.colony.level == 8 ? Setups.upgraders.rcl8 : Setups.upgraders.default;
+			let setup = Setups.upgraders.default;
+			if (this.colony.level == 8) {
+				setup = Setups.upgraders.rcl8;
+				if (this.colony.labs.length == 10 &&
+					this.colony.assets[RESOURCE_CATALYZED_GHODIUM_ACID] >= 4 * LAB_BOOST_MINERAL) {
+					setup = Setups.upgraders.rcl8_boosted;
+				}
+			}
+
 			if (this.colony.level == 8) {
 				this.wishlist(1, setup);
 			} else {

@@ -39,7 +39,8 @@ export class ClaimingOverlord extends Overlord {
 			}
 			return 1; // otherwise ask for 1 claimer
 		});
-		this.wishlist(amount, Setups.infestors.claim);
+		const setup = this.colony.level > 4 ? Setups.infestors.fastClaim : Setups.infestors.claim;
+		this.wishlist(amount, setup);
 	}
 
 	private handleClaimer(claimer: Zerg): void {
@@ -55,11 +56,16 @@ export class ClaimingOverlord extends Overlord {
 				claimer.task = Tasks.claim(this.room.controller!);
 			}
 		} else {
-			claimer.goTo(this.pos, {ensurePath: true, avoidSK: true, waypoints: this.directive.waypoints});
+			claimer.goTo(this.pos, {pathOpts : {ensurePath: true, avoidSK: true}});
 		}
 	}
 
 	run() {
 		this.autoRun(this.claimers, claimer => this.handleClaimer(claimer));
+		if (this.room && this.room.controller && this.room.controller.my && this.room.controller.signedByMe) {
+			for (const claimer of this.claimers) {
+				claimer.suicide();
+			}
+		}
 	}
 }

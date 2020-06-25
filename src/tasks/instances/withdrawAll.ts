@@ -1,10 +1,9 @@
 /* Withdraw a resource from a target */
 
-import {StoreStructure} from '../../declarations/typeGuards';
 import {profile} from '../../profiler/decorator';
 import {Task} from '../Task';
 
-export type withdrawAllTargetType = StoreStructure | Tombstone;
+export type withdrawAllTargetType = AnyStoreStructure;
 
 export const withdrawAllTaskName = 'withdrawAll';
 
@@ -26,11 +25,18 @@ export class TaskWithdrawAll extends Task {
 	}
 
 	work() {
-		for (const resourceType in this.target.store) {
-			const amountInStore = this.target.store[<ResourceConstant>resourceType] || 0;
+		let resourceTransferType;
+		for (const [resourceType, amountInStore] of this.target.store.contents) {
 			if (amountInStore > 0) {
-				return this.creep.withdraw(this.target, <ResourceConstant>resourceType);
+				resourceTransferType = resourceType;
+				// Prioritize non-energy
+				if (resourceType != RESOURCE_ENERGY) {
+					break;
+				}
 			}
+		}
+		if (!!resourceTransferType) {
+			return this.creep.withdraw(this.target, <ResourceConstant>resourceTransferType);
 		}
 		return -1;
 	}

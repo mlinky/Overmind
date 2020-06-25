@@ -4,15 +4,46 @@
 
 import {MY_USERNAME} from '../~settings';
 
+PERMACACHE.structureWalkability = PERMACACHE.structureWalkability || {};
 Object.defineProperty(Structure.prototype, 'isWalkable', {
 	get() {
-		return this.structureType == STRUCTURE_ROAD ||
-			   this.structureType == STRUCTURE_CONTAINER ||
-			   (this.structureType == STRUCTURE_RAMPART && (<StructureRampart>this.my ||
-															<StructureRampart>this.isPublic));
+		if (PERMACACHE.structureWalkability[this.id] !== undefined) {
+			return PERMACACHE.structureWalkability[this.id];
+		}
+		if (this.structureType === STRUCTURE_RAMPART) {
+			return (<StructureRampart>this.my || <StructureRampart>this.isPublic);
+		} else {
+			PERMACACHE.structureWalkability[this.id] = this.structureType == STRUCTURE_ROAD ||
+													   this.structureType == STRUCTURE_CONTAINER ||
+													   this.structureType == STRUCTURE_PORTAL;
+			return PERMACACHE.structureWalkability[this.id];
+		}
 	},
 	configurable: true,
 });
+
+// monkey-patch OwnedStructure.isActive to include some caching since it's actually pretty expensive
+// const _OwnedStructureIsActive = OwnedStructure.prototype.isActive;
+OwnedStructure.prototype._isActive = OwnedStructure.prototype.isActive;
+// OwnedStructure.prototype.isActive = function() {
+// 	// Do a quick check to see if the room is owned by same owner of structure and/or if it's RCL 8
+// 	if (this.room.controller) {
+// 		const thisOwner = this.owner ? this.owner.username : 'noThisOwner';
+// 		const controllerOwner = this.room.controller.owner ? this.room.controller.username : 'noControllerOwner';
+// 		if (thisOwner != controllerOwner) { // if it's not owned by room owner, it's not active
+// 			return false;
+// 		}
+// 		const level = this.room.controller.level || 0;
+// 		if (level == 8) { // everything is active at RCL 8
+// 			return true;
+// 		}
+// 	}
+// 	// Otherwise use cached value or call this.inActive()
+// 	if (this._isActiveValue == undefined) {
+// 		this._isActiveValue = this._isActive();
+// 	}
+// 	return this._isActiveValue;
+// };
 
 // Container prototypes ================================================================================================
 
@@ -47,7 +78,7 @@ Object.defineProperty(StructureController.prototype, 'reservedByMe', {
 
 Object.defineProperty(StructureController.prototype, 'signedByMe', {
 	get         : function() {
-		return this.sign && this.sign.text == Memory.settings.signature && Game.time - this.sign.time < 250000;
+		return this.sign && this.sign.username == MY_USERNAME && Game.time - this.sign.time < 250000;
 	},
 	configurable: true,
 });
@@ -96,6 +127,13 @@ Object.defineProperty(StructureLink.prototype, 'isEmpty', { // if this container
 	configurable: true,
 });
 
+Object.defineProperty(StructureLink.prototype, 'storeCapacity', { // forwards-backwards compatibility
+	get() {
+		return this.energyCapacity;
+	},
+	configurable: true,
+});
+
 
 // Nuker prototypes ====================================================================================================
 
@@ -117,6 +155,14 @@ Object.defineProperty(StructureSpawn.prototype, 'isEmpty', { // if this containe
 	configurable: true,
 });
 
+// Storage prototypes ==================================================================================================
+declare const Store: any; // Store prototype isn't included in typed-screeps yet
+Object.defineProperty(Store.prototype, 'contents', {
+	get() {
+		return Object.entries(this);
+	},
+	configurable: true,
+});
 
 // Storage prototypes ==================================================================================================
 
@@ -165,17 +211,32 @@ Object.defineProperty(StructureTerminal.prototype, 'isEmpty', { // if this conta
 	configurable: true,
 });
 
-// StructureTerminal.prototype._send = StructureTerminal.prototype.send;
-// StructureTerminal.prototype.send = function(resourceType: ResourceConstant, amount: number, destination: string,
-// 											description?: string): ScreepsReturnCode {
-// 	// Log stats
-// 	let origin = this.room.name;
-// 	let response = this._send(resourceType, amount, destination, description);
-// 	if (response == OK) {
-// 		TerminalNetwork.logTransfer(resourceType,amount,origin, destination)
-// 	}
-// 	return response;
-// };
+Object.defineProperty(StructureTerminal.prototype, 'isReady', { // the terminal is ready to send or deal
+	get() {
+		return this.cooldown == 0 && !this._notReady;
+	},
+	configurable: true,
+});
+
+Object.defineProperty(StructureTerminal.prototype, 'hasReceived', { // terminal received this tick via send/deal
+	get() {
+		return this._hasReceived;
+	},
+	configurable: true,
+});
+
+const _terminalSend = StructureTerminal.prototype.send;
+StructureTerminal.prototype.send = function(resourceType: ResourceConstant, amount: number, destination: string,
+											description?: string): ScreepsReturnCode {
+	const response = _terminalSend.call(this, resourceType, amount, destination, description);
+	if (response == OK) {
+		this._notReady = true;
+		if (Game.rooms[destination] && Game.rooms[destination].terminal) {
+			(<any>Game.rooms[destination].terminal!)._hasReceived = true;
+		}
+	}
+	return response;
+};
 
 // Tower prototypes
 

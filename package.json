@@ -1,6 +1,6 @@
 {
   "name": "Overmind",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Overmind Screeps AI",
   "author": "Ben Bartlett",
   "license": "MIT",
@@ -21,23 +21,27 @@
     "push-main": "rollup -c --environment DEST:main",
     "push-pserver": "rollup -c --environment DEST:pserver",
     "push-screepsplus": "rollup -c --environment DEST:screepsplus",
-    "test": "npm run clean && npm run lint && npm run build"
+    "test": "npm run clean && npm run build"
+  },
+  "engines": {
+    "node": "10.x"
   },
   "devDependencies": {
-    "@types/lodash": "3.10.1",
-    "@types/screeps": "3.0.0",
-    "rollup": "0.62.0",
-    "rollup-plugin-commonjs": "8.4.1",
-    "rollup-plugin-node-resolve": "3.3.0",
-    "rollup-plugin-progress": "^0.4.0",
-    "rollup-plugin-screeps": "0.1.2",
-    "rollup-plugin-typescript2": "0.16.1",
-    "tslint": "^5.16.0",
+    "@types/node": "^10.17.18",
+    "@types/lodash": "3.10.2",
+    "@types/screeps": "^3.1.0",
+    "@rollup/plugin-commonjs": "^11.0.2",
+    "@rollup/plugin-node-resolve": "^7.1.1",
+    "rollup": "2.6.0",
+    "rollup-plugin-progress": "1.1.1",
+    "rollup-plugin-screeps": "1.0.0",
+    "rollup-plugin-typescript2": "0.27.0",
+    "tslint": "^5.20.0",
     "typedoc": "^0.14.2",
     "typescript": "2.9.2"
   },
   "dependencies": {
-    "@tensorflow/tfjs": "^1.1.2",
+    "@tensorflow/tfjs": "^1.2.11",
     "columnify": "1.5.4",
     "onnxjs": "^0.1.6",
     "source-map": "0.7.3"

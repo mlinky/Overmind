@@ -1,7 +1,7 @@
 import {Colony} from '../../Colony';
 import {log} from '../../console/log';
 import {Roles, Setups} from '../../creepSetups/setups';
-import {isResource, isStoreStructure, isTombstone} from '../../declarations/typeGuards';
+import {isResource, isTombstone} from '../../declarations/typeGuards';
 import {ALL_RESOURCE_TYPE_ERROR, BufferTarget, LogisticsRequest} from '../../logistics/LogisticsNetwork';
 import {Pathing} from '../../movement/Pathing';
 import {OverlordPriority} from '../../priorities/priorities_overlords';
@@ -49,11 +49,11 @@ export class TransportOverlord extends Overlord {
 		// Add transport power needed to move to upgradeSite
 		if (this.colony.upgradeSite.battery) {
 			transportPower += UPGRADE_CONTROLLER_POWER * this.colony.upgradeSite.upgradePowerNeeded * scaling *
-							  Pathing.distance(this.colony.pos, this.colony.upgradeSite.battery.pos);
+							  (Pathing.distance(this.colony.pos, this.colony.upgradeSite.battery.pos) || 0);
 		}
 
 
-		if (this.colony.lowPowerMode) {
+		if (this.colony.state.lowPowerMode) {
 			// Reduce needed transporters when colony is in low power mode
 			transportPower *= 0.5;
 		}
@@ -64,11 +64,11 @@ export class TransportOverlord extends Overlord {
 	init() {
 		const ROAD_COVERAGE_THRESHOLD = 0.75; // switch from 1:1 to 2:1 transporters above this coverage threshold
 		const setup = this.colony.roomPlanner.roadPlanner.roadCoverage < ROAD_COVERAGE_THRESHOLD
-					? Setups.transporters.early : Setups.transporters.default;
+					  ? Setups.transporters.early : Setups.transporters.default;
 
 		const transportPowerEach = setup.getBodyPotential(CARRY, this.colony);
 		const neededTransportPower = this.neededTransportPower();
-		const numTransporters = Math.ceil(neededTransportPower / transportPowerEach);
+		const numTransporters = Math.ceil(neededTransportPower / transportPowerEach + 0.1); // div by zero error
 
 		if (this.transporters.length == 0) {
 			this.wishlist(numTransporters, setup, {priority: OverlordPriority.ownedRoom.firstTransport});
@@ -81,7 +81,7 @@ export class TransportOverlord extends Overlord {
 		if (request) {
 			const choices = this.colony.logisticsNetwork.bufferChoices(transporter, request);
 			const bestChoice = _.last(_.sortBy(choices, choice => request.multiplier * choice.dQ
-																/ Math.max(choice.dt, 0.1)));
+																  / Math.max(choice.dt, 0.1)));
 			let task = null;
 			const amount = this.colony.logisticsNetwork.predictedRequestAmount(transporter, request);
 			// Target is requesting input
@@ -93,13 +93,13 @@ export class TransportOverlord extends Overlord {
 					log.error(`${this.print}: cannot request 'all' as input!`);
 					return;
 				} else {
-					task = Tasks.transfer(request.target, request.resourceType);
+					task = Tasks.transfer(<TransferrableStoreStructure>request.target, request.resourceType);
 				}
 				if (bestChoice.targetRef != request.target.ref) {
 					// If we need to go to a buffer first to get more stuff
 					const buffer = deref(bestChoice.targetRef) as BufferTarget;
 					const withdrawAmount = Math.min(buffer.store[request.resourceType] || 0,
-												  transporter.carryCapacity - _.sum(transporter.carry), amount);
+													transporter.carryCapacity - _.sum(transporter.carry), amount);
 					task = task.fork(Tasks.withdraw(buffer, request.resourceType, withdrawAmount));
 					if (transporter.hasMineralsInCarry && request.resourceType == RESOURCE_ENERGY) {
 						task = task.fork(Tasks.transferAll(buffer));
@@ -112,8 +112,8 @@ export class TransportOverlord extends Overlord {
 					task = Tasks.pickup(request.target);
 				} else {
 					if (request.resourceType == 'all') {
-						if (!isStoreStructure(request.target) && !isTombstone(request.target)) {
-							log.error(`TransportOverlord: ` + ALL_RESOURCE_TYPE_ERROR);
+						if (isResource(request.target)) {
+							log.error(this.print + ALL_RESOURCE_TYPE_ERROR);
 							return;
 						}
 						task = Tasks.withdrawAll(request.target);
@@ -192,7 +192,7 @@ export class TransportOverlord extends Overlord {
 		const tombstone = transporter.pos.lookFor(LOOK_TOMBSTONES)[0];
 		if (tombstone) {
 			const resourceType = _.last(_.sortBy(_.keys(tombstone.store),
-											   resourceType => (tombstone.store[<ResourceConstant>resourceType] || 0)));
+												 resourceType => (tombstone.store[<ResourceConstant>resourceType] || 0)));
 			transporter.withdraw(tombstone, <ResourceConstant>resourceType);
 		}
 	}

@@ -1,38 +1,71 @@
 type operationMode = 'manual' | 'semiautomatic' | 'automatic';
 
+/**
+ * TODO make this an enum
+ * 0: Basic
+ * 1: Collect from enemy storage/terminal
+ * 2: Collect from all sources TBD
+ * 3: Collect all and mine walls for energy TBD
+ */
+type resourceCollectionMode = number;
+
 interface RawMemory {
 	_parsed: any;
 }
 
 interface Memory {
+	tick: number;
+	build: number;
 	assimilator: any;
 	Overmind: {};
+	profiler: any;
 	overseer: any;
 	segmenter: any;
-	strategist?: any;
+	roomIntel: any;
 	colonies: { [name: string]: any };
 	creeps: { [name: string]: CreepMemory; };
+	powerCreeps: {[name: string]: PowerCreepMemory};
 	flags: { [name: string]: FlagMemory; };
 	rooms: { [name: string]: RoomMemory; };
 	spawns: { [name: string]: SpawnMemory; };
 	pathing: PathingMemory;
-	settings: {
-		signature: string;
-		operationMode: operationMode;
-		log: LoggerMemory;
-		enableVisuals: boolean;
-	};
-	profiler?: any;
-	stats: any;
 	constructionSites: { [id: string]: number };
+	stats: any;
+
 	// suspend?: number;
 	resetBucket?: boolean;
 	haltTick?: number;
 	combatPlanner: any;
+	playerCreepTracker: { // TODO revisit for a better longterm solution
+		[playerName: string]: CreepTracker
+	};
+	// zoneRooms: { [roomName: string]: { [type: string]: number } };
+
 	reinforcementLearning?: {
 		enabled?: boolean;
 		verbosity?: number;
 		workerIndex?: number;
+	};
+
+	screepsProfiler?: any;
+
+	settings: {
+		signature: string;
+		operationMode: operationMode;
+		log: any;
+		enableVisuals: boolean;
+		allies: string[];
+		resourceCollectionMode: resourceCollectionMode;
+		powerCollection: {
+			enabled: boolean;
+			maxRange: number;
+			minPower: number;
+		};
+		autoPoison: {
+			enabled: boolean;
+			maxRange: number;
+			maxConcurrent: number;
+		},
 	};
 
 	[otherProperty: string]: any;
@@ -82,12 +115,19 @@ interface PublicSegment {
 }
 
 interface CreepMemory {
-	[_MEM.OVERLORD]: string | null;
-	[_MEM.COLONY]: string | null;
+	[MEM.OVERLORD]: string | null;
+	[MEM.COLONY]: string | null;
 	role: string;
 	task: ProtoTask | null;
+	sleepUntil?: number;
+	needBoosts?: ResourceConstant[];
 	data: {
 		origin: string;
+	};
+	avoidDanger?: {
+		start: number;
+		timer: number;
+		fallback: string;
 	};
 	noNotifications?: boolean;
 	_go?: MoveData;
@@ -103,17 +143,10 @@ interface MoveData {
 	fleeWait?: number;
 	destination?: ProtoPos;
 	priority?: number;
-	waypoints?: string[];
-	waypointsVisited?: string[];
+	// waypoints?: string[];
+	// waypointsVisited?: string[];
 	portaling?: boolean;
 }
-
-interface LoggerMemory {
-	level: number;
-	showSource: boolean;
-	showTick: boolean;
-}
-
 
 interface CachedPath {
 	path: RoomPosition[];
@@ -122,173 +155,62 @@ interface CachedPath {
 }
 
 interface PathingMemory {
-	paths: { [originName: string]: { [destinationName: string]: CachedPath; } };
+	// paths: { [originName: string]: { [destinationName: string]: CachedPath; } };
 	distances: { [pos1Name: string]: { [pos2Name: string]: number; } };
-	weightedDistances: { [pos1Name: string]: { [pos2Name: string]: number; } };
+	// weightedDistances: { [pos1Name: string]: { [pos2Name: string]: number; } };
+}
+
+interface CreepTracker {
+	creeps: { [name: string]: number }; 	// first tick seen
+	types: { [type: string]: number }; 		// amount seen
+	parts: { [bodyPart: string]: number }; 	// quantity
+	boosts: { [boostType: string]: number };	// how many boosts are spent
 }
 
 interface FlagMemory {
-	[_MEM.TICK]?: number;
-	[_MEM.EXPIRATION]?: number;
-	[_MEM.COLONY]?: string;
-	suspendUntil?: number;
+	[MEM.TICK]?: number;
+	[MEM.EXPIRATION]?: number;
+	[MEM.COLONY]?: string;
+	[MEM.DISTANCE]?: {
+		[MEM_DISTANCE.UNWEIGHTED]: number;
+		[MEM_DISTANCE.WEIGHTED]: number;
+		[MEM.EXPIRATION]: number;
+		incomplete?: boolean;
+	};
+	debug?: boolean;
 	amount?: number;
 	persistent?: boolean;
-	setPosition?: ProtoPos;
+	setPos?: ProtoPos;
 	rotation?: number;
 	parent?: string;
 	maxPathLength?: number;
+	pathNotRequired?: boolean;
 	maxLinearRange?: number;
 	keepStorageStructures?: boolean;
 	keepRoads?: boolean;
 	keepContainers?: boolean;
-	waypoints?: string[];
+	// waypoints?: string[];
+	allowPortals?: boolean;
+	recalcColonyOnTick?: number;
 }
 
 // Room memory key aliases to minimize memory size
 
-declare const enum _MEM {
+declare const enum MEM {
 	TICK       = 'T',
 	EXPIRATION = 'X',
 	COLONY     = 'C',
 	OVERLORD   = 'O',
 	DISTANCE   = 'D',
+	STATS      = 'S',
 }
 
-declare const enum _RM {
-	AVOID                = 'a',
-	SOURCES              = 's',
-	CONTROLLER           = 'c',
-	MINERAL              = 'm',
-	SKLAIRS              = 'k',
-	EXPANSION_DATA       = 'e',
-	INVASION_DATA        = 'v',
-	HARVEST              = 'h',
-	CASUALTIES           = 'd',
-	SAFETY               = 'f',
-	PREV_POSITIONS       = 'p',
-	CREEPS_IN_ROOM       = 'cr',
-	IMPORTANT_STRUCTURES = 'i',
-	PORTALS              = 'pr',
-}
-
-declare const enum _RM_IS {
-	TOWERS   = 't',
-	SPAWNS   = 'sp',
-	STORAGE  = 's',
-	TERMINAL = 'e',
-	WALLS    = 'w',
-	RAMPARTS = 'r',
-}
-
-declare const enum _RM_CTRL {
-	LEVEL              = 'l',
-	OWNER              = 'o',
-	RESERVATION        = 'r',
-	RES_USERNAME       = 'u',
-	RES_TICKSTOEND     = 't',
-	SAFEMODE           = 's',
-	SAFEMODE_AVAILABLE = 'sa',
-	SAFEMODE_COOLDOWN  = 'sc',
-	PROGRESS           = 'p',
-	PROGRESS_TOTAL     = 'pt',
-}
-
-declare const enum _RM_MNRL {
-	MINERALTYPE = 't',
-	DENSITY     = 'd',
-}
-
-declare const enum _ROLLING_STATS {
-	AMOUNT  = 'a',
-	AVG10K  = 'D',
-	AVG100K = 'H',
-	AVG1M   = 'M',
+declare const enum MEM_DISTANCE {
+	UNWEIGHTED = 'u',
+	WEIGHTED   = 'w',
 }
 
 
-interface RollingStats {
-	[_ROLLING_STATS.AMOUNT]: number;
-	[_ROLLING_STATS.AVG10K]: number;
-	[_ROLLING_STATS.AVG100K]: number;
-	[_ROLLING_STATS.AVG1M]: number;
-	[_MEM.TICK]: number;
-}
 
-interface ExpansionData {
-	score: number;
-	bunkerAnchor: string;
-	outposts: { [roomName: string]: number };
-}
 
-interface RoomMemory {
-	[_MEM.EXPIRATION]?: number;
-	[_MEM.TICK]?: number;
-	[_RM.AVOID]?: boolean;
-	[_RM.SOURCES]?: SavedSource[];
-	[_RM.CONTROLLER]?: SavedController | undefined;
-	[_RM.PORTALS]?: SavedPortal[];
-	[_RM.MINERAL]?: SavedMineral | undefined;
-	[_RM.SKLAIRS]?: SavedRoomObject[];
-	[_RM.IMPORTANT_STRUCTURES]?: {
-		// Positions of important structures relevant to sieges
-		[_RM_IS.TOWERS]: string[];
-		[_RM_IS.SPAWNS]: string[];
-		[_RM_IS.STORAGE]: string | undefined;
-		[_RM_IS.TERMINAL]: string | undefined;
-		[_RM_IS.WALLS]: string[];
-		[_RM_IS.RAMPARTS]: string[];
-	} | undefined;
-	[_RM.EXPANSION_DATA]?: ExpansionData | false;
-	[_RM.INVASION_DATA]?: {
-		harvested: number;
-		lastSeen: number;
-	};
-	[_RM.HARVEST]?: RollingStats;
-	[_RM.CASUALTIES]?: {
-		cost: RollingStats
-	};
-	[_RM.SAFETY]?: SafetyData;
-	[_RM.PREV_POSITIONS]?: { [creepID: string]: ProtoPos };
-	[_RM.CREEPS_IN_ROOM]?: { [tick: number]: string[] };
-}
 
-interface SavedRoomObject {
-	c: string; 	// coordinate name
-}
-
-interface SavedSource extends SavedRoomObject {
-	contnr: string | undefined;
-}
-
-interface SavedPortal extends SavedRoomObject {
-	dest: string | { shard: string, room: string }; // destination name
-	[_MEM.EXPIRATION]: number; // when portal will decay
-}
-
-interface SavedController extends SavedRoomObject {
-	[_RM_CTRL.LEVEL]: number;
-	[_RM_CTRL.OWNER]: string | undefined;
-	[_RM_CTRL.RESERVATION]: {
-		[_RM_CTRL.RES_USERNAME]: string,
-		[_RM_CTRL.RES_TICKSTOEND]: number,
-	} | undefined;
-	[_RM_CTRL.SAFEMODE]: number | undefined;
-	[_RM_CTRL.SAFEMODE_AVAILABLE]: number;
-	[_RM_CTRL.SAFEMODE_COOLDOWN]: number | undefined;
-	[_RM_CTRL.PROGRESS]: number | undefined;
-	[_RM_CTRL.PROGRESS_TOTAL]: number | undefined;
-}
-
-interface SavedMineral extends SavedRoomObject {
-	[_RM_MNRL.MINERALTYPE]: MineralConstant;
-	[_RM_MNRL.DENSITY]: number;
-}
-
-interface SafetyData {
-	safeFor: number;
-	unsafeFor: number;
-	safety1k: number;
-	safety10k: number;
-	tick: number;
-}

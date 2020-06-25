@@ -1,15 +1,18 @@
-import {Colony, ColonyStage} from './Colony';
+import {Colony, ColonyStage, getAllColonies, OutpostDisableReason} from './Colony';
 import {log} from './console/log';
 import {bodyCost} from './creepSetups/CreepSetup';
 import {Roles} from './creepSetups/setups';
-import {DirectiveClearRoom} from './directives/colony/clearRoom';
 import {DirectiveColonize} from './directives/colony/colonize';
 import {DirectiveOutpost} from './directives/colony/outpost';
+import {DirectivePoisonRoom} from './directives/colony/poisonRoom';
 import {DirectiveGuard} from './directives/defense/guard';
 import {DirectiveInvasionDefense} from './directives/defense/invasionDefense';
 import {DirectiveOutpostDefense} from './directives/defense/outpostDefense';
 import {Directive} from './directives/Directive';
 import {Notifier} from './directives/Notifier';
+import {DirectiveExtract} from './directives/resource/extract';
+import {DirectiveHarvest} from './directives/resource/harvest';
+import {DirectivePowerMine} from './directives/resource/powerMine';
 import {DirectiveBootstrap} from './directives/situational/bootstrap';
 import {DirectiveNukeResponse} from './directives/situational/nukeResponse';
 import {DirectiveTerminalEvacuateState} from './directives/terminalState/terminalState_evacuate';
@@ -20,8 +23,15 @@ import {Pathing} from './movement/Pathing';
 import {Overlord} from './overlords/Overlord';
 import {profile} from './profiler/decorator';
 import {CombatPlanner} from './strategy/CombatPlanner';
-import {Cartographer, ROOMTYPE_CONTROLLER, ROOMTYPE_SOURCEKEEPER} from './utilities/Cartographer';
-import {derefCoords, hasJustSpawned, minBy, onPublicServer} from './utilities/utils';
+import {
+	Cartographer,
+	ROOMTYPE_ALLEY,
+	ROOMTYPE_CONTROLLER,
+	ROOMTYPE_CROSSROAD,
+	ROOMTYPE_SOURCEKEEPER
+} from './utilities/Cartographer';
+import {p} from './utilities/random';
+import {canClaimAnotherRoom, getAllRooms, hasJustSpawned, minBy, onPublicServer} from './utilities/utils';
 import {MUON, MY_USERNAME, USE_TRY_CATCH} from './~settings';
 import { DirectivePairDestroy } from 'directives/offense/pairDestroy';
 import { DirectiveDismantle } from 'directives/targeting/dismantle';
@@ -30,12 +40,10 @@ import { DirectiveDismantle } from 'directives/targeting/dismantle';
 // export const DIRECTIVE_CHECK_FREQUENCY = 2;
 
 interface OverseerMemory {
-	suspendUntil: { [overlordRef: string]: number }; // overlords are suspended until tick
+
 }
 
-const defaultOverseerMemory: OverseerMemory = {
-	suspendUntil: {},
-};
+const getDefaultOverseerMemory: () => OverseerMemory = () => ({});
 
 /**
  * The Overseer object acts as a scheduler, running directives and overlords for all colonies each tick. It is also
@@ -45,10 +53,17 @@ const defaultOverseerMemory: OverseerMemory = {
 export class Overseer implements IOverseer {
 
 	private memory: OverseerMemory;
-	private overlords: Overlord[];								// Overlords sorted by priority
-	private sorted: boolean;
-	private overlordsByColony: { [col: string]: Overlord[] };	// Overlords grouped by colony
-	private directives: Directive[];							// Directives across the colony
+
+	private directives: Directive[];
+	private directivesByType: { [directiveName: string]: Directive[] };
+	private directivesByRoom: { [roomName: string]: Directive[] };
+	private directivesByColony: { [colonyName: string]: Directive[] };
+
+	private overlords: Overlord[];
+	private overlordsByColony: { [col: string]: Overlord[] };
+
+	private _directiveCached: boolean;
+	private _overlordsCached: boolean;
 
 	combatPlanner: CombatPlanner;
 	notifier: Notifier;
@@ -58,17 +73,17 @@ export class Overseer implements IOverseer {
 	};
 
 	constructor() {
-		this.memory = Mem.wrap(Memory, 'overseer', defaultOverseerMemory);
+		this.memory = Mem.wrap(Memory, 'overseer', getDefaultOverseerMemory);
 		this.directives = [];
 		this.overlords = [];
 		this.overlordsByColony = {};
-		this.sorted = false;
+		this._overlordsCached = false;
 		this.notifier = new Notifier();
 		this.combatPlanner = new CombatPlanner();
 	}
 
 	refresh() {
-		this.memory = Mem.wrap(Memory, 'overseer', defaultOverseerMemory);
+		this.memory = Mem.wrap(Memory, 'overseer', getDefaultOverseerMemory);
 		this.notifier.clear();
 	}
 
@@ -90,12 +105,9 @@ export class Overseer implements IOverseer {
 		}
 	}
 
-	private get colonies(): Colony[] {
-		return _.values(Overmind.colonies);
-	}
-
 	registerDirective(directive: Directive): void {
 		this.directives.push(directive);
+		this._directiveCached = false;
 	}
 
 	removeDirective(directive: Directive): void {
@@ -103,46 +115,59 @@ export class Overseer implements IOverseer {
 		for (const name in directive.overlords) {
 			this.removeOverlord(directive.overlords[name]);
 		}
+		this._directiveCached = false;
+	}
+
+	private ensureDirectivesCached(): void {
+		if (!this._directiveCached) {
+			this.directivesByType = _.groupBy(this.directives, directive => directive.directiveName);
+			this.directivesByRoom = _.groupBy(this.directives, directive => directive.pos.roomName);
+			this.directivesByColony = _.groupBy(this.directives, directive => directive.colony.name || 'none');
+			this._directiveCached = true;
+		}
+	}
+
+	getDirectivesOfType(directiveName: string): Directive[] {
+		this.ensureDirectivesCached();
+		return this.directivesByType[directiveName] || [];
+	}
+
+	getDirectivesInRoom(roomName: string): Directive[] {
+		this.ensureDirectivesCached();
+		return this.directivesByRoom[roomName] || [];
+	}
+
+	getDirectivesForColony(colony: Colony): Directive[] {
+		this.ensureDirectivesCached();
+		return this.directivesByColony[colony.name] || [];
 	}
 
 	registerOverlord(overlord: Overlord): void {
 		this.overlords.push(overlord);
-		if (!this.overlordsByColony[overlord.colony.name]) {
-			this.overlordsByColony[overlord.colony.name] = [];
-		}
-		this.overlordsByColony[overlord.colony.name].push(overlord);
-	}
-
-	getOverlordsForColony(colony: Colony): Overlord[] {
-		return this.overlordsByColony[colony.name];
+		this._overlordsCached = false;
 	}
 
 	private removeOverlord(overlord: Overlord): void {
 		_.remove(this.overlords, o => o.ref == overlord.ref);
-		if (this.overlordsByColony[overlord.colony.name]) {
-			_.remove(this.overlordsByColony[overlord.colony.name], o => o.ref == overlord.ref);
-		}
+		this._overlordsCached = false;
 	}
 
-	isOverlordSuspended(overlord: Overlord): boolean {
-		if (this.memory.suspendUntil[overlord.ref]) {
-			if (Game.time < this.memory.suspendUntil[overlord.ref]) {
-				return true;
-			} else {
-				delete this.memory.suspendUntil[overlord.ref];
-				return false;
+	private ensureOverlordsCached(): void {
+		if (!this._overlordsCached) {
+			this.overlords.sort((o1, o2) => o1.priority - o2.priority);
+			this.overlordsByColony = _.groupBy(this.overlords, overlord => overlord.colony.name);
+			for (const colName in this.overlordsByColony) {
+				this.overlordsByColony[colName].sort((o1, o2) => o1.priority - o2.priority);
 			}
+			this._overlordsCached = true;
 		}
-		return false;
 	}
 
-	suspendOverlordFor(overlord: Overlord, ticks: number): void {
-		this.memory.suspendUntil[overlord.ref] = Game.time + ticks;
+	getOverlordsForColony(colony: Colony): Overlord[] {
+		return this.overlordsByColony[colony.name] || [];
 	}
 
-	suspendOverlordUntil(overlord: Overlord, untilTick: number): void {
-		this.memory.suspendUntil[overlord.ref] = untilTick;
-	}
+	// Initialization ==================================================================================================
 
 	private registerLogisticsRequests(colony: Colony): void {
 		// Register logistics requests for all dropped resources and tombstones
@@ -167,10 +192,53 @@ export class Overseer implements IOverseer {
 		}
 	}
 
+	init(): void {
+
+		this.ensureDirectivesCached();
+		this.ensureOverlordsCached();
+
+		// Initialize directives
+		for (const directive of this.directives) {
+			directive.init();
+		}
+
+		// Initialize overlords
+		for (const overlord of this.overlords) {
+			if (!overlord.isSuspended) {
+				if (overlord.profilingActive) {
+					const start = Game.cpu.getUsed();
+					overlord.preInit();
+					this.try(() => overlord.init());
+					overlord.memory[MEM.STATS]!.cpu += Game.cpu.getUsed() - start;
+				} else {
+					overlord.preInit();
+					this.try(() => overlord.init());
+				}
+			}
+		}
+
+		// Register cleanup requests to logistics network
+		for (const colony of getAllColonies()) {
+			this.registerLogisticsRequests(colony);
+		}
+	}
+
+
+	// Run phase methods ===============================================================================================
+
+	private placeHarvestingDirectives(colony: Colony) {
+		for (const source of colony.sources) {
+			DirectiveHarvest.createIfNotPresent(source.pos, 'pos');
+		}
+		if (colony.controller.level >= 6 && colony.terminal) {
+			_.forEach(colony.extractors, extractor => DirectiveExtract.createIfNotPresent(extractor.pos, 'pos'));
+		}
+	}
+
 	private handleBootstrapping(colony: Colony) {
 		// Bootstrap directive: in the event of catastrophic room crash, enter emergency spawn mode.
 		// Doesn't apply to incubating colonies.
-		if (!colony.isIncubating) {
+		if (!colony.state.isIncubating) {
 			const noQueen = colony.getCreepsByRole(Roles.queen).length == 0;
 			if (noQueen && colony.hatchery && !colony.spawnGroup) {
 				const setup = colony.hatchery.overlord.queenSetup;
@@ -185,20 +253,25 @@ export class Overseer implements IOverseer {
 		}
 	}
 
-	private handleOutpostDefense(colony: Colony) {
+	private handleOutpostDefense(colony: Colony) { // TODO: plug in threatLevel infra
 		// Guard directive: defend your outposts and all rooms of colonies that you are incubating
 		for (const room of colony.outposts) {
+			if (!colony.isRoomActive(room.name)) {
+				continue;
+			}
 			// Handle player defense
 			if (room.dangerousPlayerHostiles.length > 0) {
 				DirectiveOutpostDefense.createIfNotPresent(Pathing.findPathablePosition(room.name), 'room');
-				return;
 			}
 			// Handle NPC invasion directives
-			if (Cartographer.roomType(room.name) != ROOMTYPE_SOURCEKEEPER) { // SK rooms can fend for themselves
-				const defenseFlags = _.filter(room.flags, flag => DirectiveGuard.filter(flag) ||
-																  DirectiveOutpostDefense.filter(flag));
-				if (room.dangerousHostiles.length > 0 && defenseFlags.length == 0) {
-					DirectiveGuard.create(room.dangerousHostiles[0].pos);
+			else if (Cartographer.roomType(room.name) != ROOMTYPE_SOURCEKEEPER) { // SK rooms can fend for themselves
+				if (room.invaders.length > 0 || (room.invaderCore && room.invaderCore.level == 0)) {
+					const defenseDirectives = [...DirectiveGuard.find(room.flags),
+											   ...DirectiveOutpostDefense.find(room.flags)];
+					if (defenseDirectives.length == 0) {
+						const placePos = (room.invaders[0] || room.invaderCore).pos;
+						DirectiveGuard.create(placePos);
+					}
 				}
 			}
 			if (Game.time % 55 == 0) {
@@ -218,22 +291,37 @@ export class Overseer implements IOverseer {
 		}
 	}
 
-	private handleColonyInvasions(colony: Colony) {
-		// Defend against invasions in owned rooms
-		if (colony.room) {
+	// private handleStrongholds(colony: Colony) {
+	// 	if (Game.time % 57 == 0) {
+	// 		for (const room of colony.outposts) {
+	// 			if (room.invaderCore) {
+	// 				log.alert(`Found core in ${room.name} with ${room.invaderCore} level ${room.invaderCore.level}`);
+	// 				if (room.invaderCore.level == 0) {
+	// 					DirectiveModularDismantle.createIfNotPresent(room.invaderCore.pos, 'pos');
+	// 				}
+	// 				// else if (room.invaderCore.level <= 4 && room.invaderCore.ticksToDeploy) {
+	// 				// 	res = DirectiveStronghold.createIfNotPresent(room.invaderCore.pos, 'room');
+	// 				// 	if (!!res) {
+	// 				// 		log.notify(`Creating inactiveStronghold clearing ranged attacker in room ${room.name}`);
+	// 				// 	}
+	// 				// }
+	// 			}
+	// 		}
+	// 	}
+	// }
 
-			// See if invasion is big enough to warrant creep defenses
-			const effectiveInvaderCount = _.sum(_.map(colony.room.hostiles,
-													invader => invader.boosts.length > 0 ? 2 : 1));
-			const needsDefending = effectiveInvaderCount >= 3 || colony.room.dangerousPlayerHostiles.length > 0;
-
-			if (needsDefending) {
+	private handleColonyInvasions(colony: Colony, checkPersistent = false) {
+		// See if invasion is big enough to warrant creep defenses
+		if (!colony.room.isSafe && colony.room.threatLevel > 0.25) {
+			if (checkPersistent) {
 				// Place defensive directive after hostiles have been present for a long enough time
 				const safetyData = RoomIntel.getSafetyData(colony.room.name);
 				const invasionIsPersistent = safetyData.unsafeFor > 20;
 				if (invasionIsPersistent) {
 					DirectiveInvasionDefense.createIfNotPresent(colony.controller.pos, 'room');
 				}
+			} else {
+				DirectiveInvasionDefense.createIfNotPresent(colony.controller.pos, 'room');
 			}
 		}
 	}
@@ -247,21 +335,61 @@ export class Overseer implements IOverseer {
 		}
 	}
 
+	/**
+	 * Creates directives to handle mining from nearby power banks
+	 */
+	private handlePowerMining(room: Room) {
+
+		const powerSetting = Memory.settings.powerCollection;
+
+		const roomType = Cartographer.roomType(room.name);
+
+		if (powerSetting.enabled && (roomType == ROOMTYPE_ALLEY || roomType == ROOMTYPE_CROSSROAD)) {
+
+			const powerBank = _.first(room.powerBanks);
+			if (powerBank && powerBank.ticksToDecay > 4000 && powerBank.power >= powerSetting.minPower) {
+
+				if (DirectivePowerMine.isPresent(powerBank.pos)) {
+					return;
+				}
+
+				const validColonies = _.filter(getAllColonies(),
+											   colony => colony.level >= DirectivePowerMine.requiredRCL
+														 && Game.map.getRoomLinearDistance(colony.name, room.name)
+														 <= powerSetting.maxRange);
+				for (const colony of validColonies) {
+					const route = Game.map.findRoute(colony.room, powerBank.room);
+					if (route != ERR_NO_PATH && route.length <= powerSetting.maxRange) {
+						log.info(`FOUND POWER BANK IN RANGE ${route.length}, STARTING MINING ${powerBank.room}`);
+						DirectivePowerMine.create(powerBank.pos);
+						return;
+					}
+				}
+			}
+
+		}
+
+	}
+
 	private computePossibleOutposts(colony: Colony, depth = 3): string[] {
 		return _.filter(Cartographer.findRoomsInRange(colony.room.name, depth), roomName => {
 			if (Cartographer.roomType(roomName) != ROOMTYPE_CONTROLLER) {
 				return false;
 			}
 			const alreadyAnOutpost = _.any(Overmind.cache.outpostFlags,
-										 flag => (flag.memory.setPosition || flag.pos).roomName == roomName);
+										   flag => (flag.memory.setPos || flag.pos).roomName == roomName);
 			const alreadyAColony = !!Overmind.colonies[roomName];
 			if (alreadyAColony || alreadyAnOutpost) {
 				return false;
 			}
 			const alreadyOwned = RoomIntel.roomOwnedBy(roomName);
 			const alreadyReserved = RoomIntel.roomReservedBy(roomName);
+			const isBlocked = Game.flags[roomName + '-Block'] != null; // TODO: this is ugly
+			if (isBlocked) {
+				// Game.notify("Room " + roomName + " is blocked, not expanding there.");
+			}
 			const disregardReservations = !onPublicServer() || MY_USERNAME == MUON;
-			if (alreadyOwned || (alreadyReserved && !disregardReservations)) {
+			if (alreadyOwned || (alreadyReserved && !disregardReservations) || isBlocked) {
 				return false;
 			}
 			const neighboringRooms = _.values(Game.map.describeExits(roomName)) as string[];
@@ -271,22 +399,20 @@ export class Overseer implements IOverseer {
 	}
 
 	private handleNewOutposts(colony: Colony) {
-		const numSources = _.sum(colony.roomNames,
-							   roomName => Memory.rooms[roomName] && Memory.rooms[roomName][_RM.SOURCES]
-										   ? Memory.rooms[roomName][_RM.SOURCES]!.length
-										   : 0);
+		const numSources = _.sum(colony.roomNames, // TODO: rewrite to include suspension?
+								 roomName => Memory.rooms[roomName] && Memory.rooms[roomName][RMEM.SOURCES]
+											 ? Memory.rooms[roomName][RMEM.SOURCES]!.length
+											 : 0);
 		const numRemotes = numSources - colony.room.sources.length;
 		if (numRemotes < Colony.settings.remoteSourcesByLevel[colony.level]) {
 
 			const possibleOutposts = this.computePossibleOutposts(colony);
 
 			const origin = colony.pos;
-			const bestOutpost = minBy(possibleOutposts, function(roomName) {
-				if (!Memory.rooms[roomName]) return false;
-				const sourceCoords = Memory.rooms[roomName][_RM.SOURCES] as SavedSource[] | undefined;
-				if (!sourceCoords) return false;
-				const sourcePositions = _.map(sourceCoords, src => derefCoords(src.c, roomName));
-				const sourceDistances = _.map(sourcePositions, pos => Pathing.distance(origin, pos));
+			const bestOutpost = minBy(possibleOutposts, function(outpostName) {
+				const sourceInfo = RoomIntel.getSourceInfo(outpostName);
+				if (!sourceInfo) return false;
+				const sourceDistances = _.map(sourceInfo, src => Pathing.distance(origin, src.pos));
 				if (_.any(sourceDistances, dist => dist == undefined || dist > Colony.settings.maxSourceDistance)) {
 					return false;
 				}
@@ -296,34 +422,117 @@ export class Overseer implements IOverseer {
 			if (bestOutpost) {
 				const pos = Pathing.findPathablePosition(bestOutpost);
 				log.info(`Colony ${colony.room.print} now remote mining from ${pos.print}`);
-				DirectiveOutpost.createIfNotPresent(pos, 'room', {memory: {[_MEM.COLONY]: colony.name}});
+				DirectiveOutpost.createIfNotPresent(pos, 'room', {memory: {[MEM.COLONY]: colony.name}});
 			}
 		}
 	}
 
-	/* Place new event-driven flags where needed to be instantiated on the next tick */
-	private placeDirectives(colony: Colony): void {
-		this.handleBootstrapping(colony);
-		this.handleOutpostDefense(colony);
-		this.handleColonyInvasions(colony);
-		this.handleNukeResponse(colony);
-		if (getAutonomyLevel() > Autonomy.Manual) {
-			if (Game.time % Overseer.settings.outpostCheckFrequency == 2 * colony.id) {
-				this.handleNewOutposts(colony);
-			}
-			// Place pioneer directives in case the colony doesn't have a spawn for some reason
-			if (Game.time % 25 == 0 && colony.spawns.length == 0 &&
-				!DirectiveClearRoom.isPresent(colony.pos, 'room')) {
-				// verify that there are no spawns (not just a caching glitch)
-				const spawns = Game.rooms[colony.name]!.find(FIND_MY_SPAWNS);
-				if (spawns.length == 0) {
-					const pos = Pathing.findPathablePosition(colony.room.name);
-					DirectiveColonize.createIfNotPresent(pos, 'room');
+	private handleAutoPoisoning() {
+		// Can only have a max number of concurrent poisons at a time
+		const poisonDirectives = this.directivesByType[DirectivePoisonRoom.directiveName];
+		if (poisonDirectives.length >= Memory.settings.autoPoison.maxConcurrent) {
+			return;
+		}
+		// Find a room to poison
+		for (const room of getAllRooms()) {
+			if (DirectivePoisonRoom.canAutoPoison(room)) {
+				const controller = room.controller!;
+				const maxRange = Memory.settings.autoPoison.maxRange;
+				if (!DirectivePoisonRoom.isPresent(controller.pos)) {
+					// See if you can poison a room
+					const colonies = getAllColonies().filter(
+						colony => colony.level >= DirectivePoisonRoom.requiredRCL
+								  && Game.map.getRoomLinearDistance(room.name, colony.room.name) <= maxRange);
+					for (const colony of colonies) {
+						const route = Game.map.findRoute(colony.room, room);
+						if (route != ERR_NO_PATH && route.length <= maxRange) {
+							log.notify(`Poisoning room ${room.print}`);
+							DirectivePoisonRoom.create(controller.pos);
+							return;
+						}
+					}
 				}
 			}
 		}
 	}
 
+	/**
+	 * Place directives to respond to various conditions
+	 */
+	private placeDirectives(): void {
+
+		const allRooms = getAllRooms();
+		const allColonies = getAllColonies();
+
+		if (LATEST_BUILD_TICK == Game.time) {
+			_.forEach(allColonies, colony => this.placeHarvestingDirectives(colony));
+		}
+
+		_.forEach(allColonies, colony => this.handleBootstrapping(colony));
+
+		_.forEach(allColonies, colony => this.handleOutpostDefense(colony));
+
+		// _.forEach(allColonies, colony => this.handleStrongholds(colony));
+
+		_.forEach(allColonies, colony => this.handleColonyInvasions(colony));
+
+		_.forEach(allColonies, colony => this.handleNukeResponse(colony));
+
+		if (Game.time % 100 == 67) {
+			_.forEach(allColonies, colony => this.handleUnkillableStrongholds(colony));
+		}
+
+		if (Memory.settings.powerCollection.enabled && Game.cpu.bucket > 8000) {
+			_.forEach(allRooms, room => this.handlePowerMining(room));
+		}
+
+		if (Memory.settings.autoPoison.enabled && canClaimAnotherRoom() && Game.cpu.bucket > 9500) {
+			if (p(0.05)) this.handleAutoPoisoning();
+		}
+
+		if (getAutonomyLevel() > Autonomy.Manual) {
+			_.forEach(allColonies, colony => {
+				if (Game.time % Overseer.settings.outpostCheckFrequency == 2 * colony.id) {
+					this.handleNewOutposts(colony);
+				}
+				// Place pioneer directives in case the colony doesn't have a spawn for some reason
+				if (Game.time % 25 == 0 && colony.spawns.length == 0) {
+					// verify that there are no spawns (not just a caching glitch)
+					if (colony.room.find(FIND_MY_SPAWNS).length == 0) {
+						const pos = Pathing.findPathablePosition(colony.room.name);
+						DirectiveColonize.createIfNotPresent(pos, 'room');
+					}
+				}
+			});
+		}
+	}
+
+	// Harass Response =================================================================================================
+
+	private handleUnkillableStrongholds(colony: Colony): void {
+
+		const suspensionDuration = 5000;
+
+		for (const room of colony.outposts) {
+
+			if (Cartographer.roomType(room.name) == ROOMTYPE_SOURCEKEEPER &&
+				room.invaderCore && room.invaderCore.level > 3) {
+
+				const roomDirectives = Directive.find(room.flags);
+
+				for (const directive of roomDirectives) {
+					for (const name in directive.overlords) {
+						directive.overlords[name].suspendFor(suspensionDuration);
+					}
+				}
+				if (colony.isRoomActive(room.name)) {
+					log.notify(`Disabling outpost ${room.print} due to Stronghold presence`);
+				}
+				colony.suspendOutpost(room.name, OutpostDisableReason.inactiveStronghold, suspensionDuration);
+			}
+		}
+
+	}
 
 	// Safe mode condition =============================================================================================
 
@@ -364,34 +573,6 @@ export class Overseer implements IOverseer {
 		}
 	}
 
-	// Initialization ==================================================================================================
-
-	init(): void {
-		// Initialize directives
-		for (const directive of this.directives) {
-			directive.init();
-		}
-		// Sort overlords by priority if needed (assumes priority does not change after constructor phase
-		if (!this.sorted) {
-			this.overlords.sort((o1, o2) => o1.priority - o2.priority);
-			for (const colName in this.overlordsByColony) {
-				this.overlordsByColony[colName].sort((o1, o2) => o1.priority - o2.priority);
-			}
-			this.sorted = true;
-		}
-		// Initialize overlords
-		for (const overlord of this.overlords) {
-			if (!this.isOverlordSuspended(overlord)) {
-				overlord.preInit();
-				this.try(() => overlord.init());
-			}
-		}
-		// Register cleanup requests to logistics network
-		for (const colony of this.colonies) {
-			this.registerLogisticsRequests(colony);
-		}
-	}
-
 	// Operation =======================================================================================================
 
 	run(): void {
@@ -399,14 +580,21 @@ export class Overseer implements IOverseer {
 			directive.run();
 		}
 		for (const overlord of this.overlords) {
-			if (!this.isOverlordSuspended(overlord)) {
-				this.try(() => overlord.run());
+			if (!overlord.isSuspended) {
+				if (overlord.profilingActive) {
+					const start = Game.cpu.getUsed();
+					this.try(() => overlord.run());
+					overlord.memory[MEM.STATS]!.cpu += Game.cpu.getUsed() - start;
+				} else {
+					this.try(() => overlord.run());
+				}
 			}
 		}
-		for (const colony of this.colonies) {
+		for (const colony of getAllColonies()) {
 			this.handleSafeMode(colony);
-			this.placeDirectives(colony);
 		}
+
+		this.placeDirectives();
 	}
 
 	getCreepReport(colony: Colony): string[][] {

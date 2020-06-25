@@ -1,4 +1,5 @@
 import { log } from 'console/log';
+import {CombatCreepSetup} from '../creepSetups/CombatCreepSetup';
 import {CreepSetup} from '../creepSetups/CreepSetup';
 import {profile} from '../profiler/decorator';
 import {Swarm} from '../zerg/Swarm';
@@ -18,7 +19,8 @@ export abstract class SwarmOverlord extends CombatOverlord {
 	/* Wishlist of creeps to simplify spawning logic; includes automatic reporting */
 
 	// TODO: at the moment, this assumes that every swarm within an overlord is the same configuration
-	protected swarmWishlist(swarmQuantity: number, config: { setup: CreepSetup, amount: number, priority?: number }[]) {
+	protected swarmWishlist(swarmQuantity: number,
+							config: { setup: CreepSetup|CombatCreepSetup, amount: number, priority?: number }[]) {
 		// Make tables to log current and needed creep quantities
 		const creepQuantities: { [role: string]: number } = {};
 		const neededQuantities: { [role: string]: number } = {};

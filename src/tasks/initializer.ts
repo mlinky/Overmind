@@ -7,6 +7,7 @@ import {claimTargetType, claimTaskName, TaskClaim} from './instances/claim';
 import {dismantleTargetType, dismantleTaskName, TaskDismantle} from './instances/dismantle';
 import {dropTargetType, dropTaskName, TaskDrop} from './instances/drop';
 import {fortifyTargetType, fortifyTaskName, TaskFortify} from './instances/fortify';
+import {generateSafeModeTargetType, generateSafeModeTaskName, TaskGenerateSafeMode} from './instances/generateSafeMode';
 import {getBoostedTargetType, getBoostedTaskName, TaskGetBoosted} from './instances/getBoosted';
 import {getRenewedTargetType, getRenewedTaskName, TaskGetRenewed} from './instances/getRenewed';
 import {goToTaskName} from './instances/goTo';
@@ -115,6 +116,9 @@ export function initializeTask(protoTask: ProtoTask): Task {
 			break;
 		case withdrawAllTaskName:
 			task = new TaskWithdrawAll(target as withdrawAllTargetType);
+			break;
+		case generateSafeModeTaskName:
+			task = new TaskGenerateSafeMode(target as generateSafeModeTargetType);
 			break;
 		default:
 			log.error(`Invalid task name: ${taskName}! task.creep: ${protoTask._creep.name}. Deleting from memory!`);

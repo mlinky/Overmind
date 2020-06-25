@@ -29,6 +29,7 @@ export class DirectiveColonize extends Directive {
 	};
 
 	constructor(flag: Flag) {
+		flag.memory.allowPortals = true;
 		super(flag, colony => colony.level >= DirectiveColonize.requiredRCL
 							  && colony.name != Directive.getPos(flag).roomName && colony.spawns.length > 0);
 		// Register incubation status
@@ -38,6 +39,7 @@ export class DirectiveColonize extends Directive {
 			log.warning(`${this.print}: ${printRoomName(this.pos.roomName)} is not a controller room; ` +
 						`removing directive!`);
 			this.remove(true);
+			return;
 		}
 	}
 
@@ -51,6 +53,7 @@ export class DirectiveColonize extends Directive {
 	}
 
 	run(verbose = false) {
+		// TODO bug where can't claim a reservation room -> this.flag.pos.roomName == this.toColonize.name
 		if (this.toColonize && this.toColonize.spawns.length > 0) {
 			// Reassign all pioneers to be miners and workers
 			const miningOverlords = _.map(this.toColonize.miningSites, site => site.overlords.mine);

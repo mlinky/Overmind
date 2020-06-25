@@ -13,11 +13,12 @@ const multipleList = [
 ];
 
 const singleList = [
-	STRUCTURE_OBSERVER, STRUCTURE_POWER_SPAWN, STRUCTURE_EXTRACTOR, STRUCTURE_NUKER,
-	// STRUCTURE_TERMINAL,   STRUCTURE_CONTROLLER,   STRUCTURE_STORAGE,
+	STRUCTURE_OBSERVER, STRUCTURE_POWER_SPAWN, STRUCTURE_EXTRACTOR,
+	STRUCTURE_NUKER, STRUCTURE_FACTORY, STRUCTURE_INVADER_CORE,
+	// STRUCTURE_TERMINAL,   STRUCTURE_CONTROLLER,   STRUCTURE_STORAGE, // These already have room.* shortcuts to them
 ];
 
-const notRepairable: string[] = [STRUCTURE_KEEPER_LAIR, STRUCTURE_PORTAL, STRUCTURE_POWER_BANK];
+const notRepairable: string[] = [STRUCTURE_KEEPER_LAIR, STRUCTURE_PORTAL, STRUCTURE_POWER_BANK, STRUCTURE_INVADER_CORE];
 
 const STRUCTURE_TIMEOUT = onPublicServer() ? 50 : 10;
 
@@ -132,6 +133,8 @@ Object.defineProperty(Room.prototype, 'repairables', {
 	configurable: true,
 });
 
+
+// TODO: this is expensive and easy to over-use. Perhaps remove this.
 Object.defineProperty(Room.prototype, 'walkableRamparts', {
 	get() {
 		if (!this._walkableRamparts) {
@@ -156,7 +159,8 @@ Object.defineProperty(Room.prototype, 'rechargeables', {
 		if (!this._rechargeables) {
 			this._rechargeables = [...this.storageUnits,
 								   ...this.droppedEnergy,
-								   ...this.tombstones];
+								   ...this.tombstones,
+								   ...this.ruins];
 		}
 		return this._rechargeables;
 	},

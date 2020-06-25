@@ -8,7 +8,6 @@ import {RoomIntel} from '../../intel/RoomIntel';
 import {Mem} from '../../memory/Memory';
 import {OverlordPriority} from '../../priorities/priorities_overlords';
 import {profile} from '../../profiler/decorator';
-import {boostResources} from '../../resources/map_resources';
 import {Visualizer} from '../../visuals/Visualizer';
 import {CombatZerg} from '../../zerg/CombatZerg';
 import {Swarm} from '../../zerg/Swarm';
@@ -42,22 +41,12 @@ export class SwarmDestroyerOverlord extends SwarmOverlord {
 		this.directive = directive;
 		this.memory = Mem.wrap(this.directive.memory, this.name);
 		this.intel = new CombatIntel(this.directive);
-
-		this.zerglings = this.combatZerg(Roles.melee, {
-			notifyWhenAttacked: false,
-			boostWishlist     : [boostResources.attack[3], boostResources.tough[3], boostResources.move[3]]
-		});
-
-		this.hydralisks = this.combatZerg(Roles.ranged, {
-		 	notifyWhenAttacked: false,
-		 	boostWishlist     : [boostResources.ranged_attack[3], boostResources.tough[3], boostResources.move[3]]
-		});
-
-		this.healers = this.combatZerg(Roles.healer, {
-			notifyWhenAttacked: false,
-			boostWishlist     : [boostResources.heal[3], boostResources.tough[3], boostResources.move[3],]
-		});
-
+		this.zerglings = this.combatZerg(Roles.melee, {notifyWhenAttacked: false});
+		// this.hydralisks = this.combatZerg(Roles.ranged, {
+		// 	notifyWhenAttacked: false,
+		// 	boostWishlist     : [BOOST_TIERS.ranged[3], BOOST_TIERS.tough[3], BOOST_TIERS.move[3]]
+		// });
+		this.healers = this.combatZerg(Roles.healer, {notifyWhenAttacked: false});
 		// Make swarms
 		this.makeSwarms();
 		// Compute fallback positions and assembly points
@@ -130,23 +119,13 @@ export class SwarmDestroyerOverlord extends SwarmOverlord {
 		}
 
 		const zerglingPriority = this.zerglings.length <= this.healers.length ? this.priority - 0.1 : this.priority + 0.1;
+		const zerglingSetup = CombatSetups.zerglings.boosted.armored;
+
 		const healerPriority = this.healers.length < this.zerglings.length ? this.priority - 0.1 : this.priority + 0.1;
-		const hydraliskPriority = this.hydralisks.length <= this.healers.length ? this.priority - 0.1 : this.priority + 0.1;
-		let zerglingSetup: CreepSetup;
-		let healerSetup: CreepSetup;
-		let hydraliskSetup: CreepSetup;
+		const healerSetup = CombatSetups.transfusers.boosted.armored;
 
-		if (this.directive.testMode) {
-			zerglingSetup = CombatSetups.zerglings.basic;
-			healerSetup = CombatSetups.healers.basic;
-			hydraliskSetup = CombatSetups.hydralisks.basic;
-	
-		} else {
-			zerglingSetup = this.canBoostSetup(CombatSetups.zerglings.boosted_T3) ? CombatSetups.zerglings.boosted_T3
-																						: CombatSetups.zerglings.default;
-
-			healerSetup = this.canBoostSetup(CombatSetups.healers.boosted_T3) ? CombatSetups.healers.boosted_T3
-																					: CombatSetups.healers.default;
+		const hydraliskPriority = this.healers.length < this.zerglings.length ? this.priority - 0.1 : this.priority + 0.1;
+		const hydraliskSetup = CombatSetups.hydralisks.boosted.armored;
 
 			hydraliskSetup = this.canBoostSetup(CombatSetups.hydralisks.siege_T3) ? CombatSetups.hydralisks.siege_T3
 																						: CombatSetups.hydralisks.default;

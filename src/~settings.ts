@@ -2,8 +2,8 @@
 
 import {leftAngleQuote, rightAngleQuote} from './utilities/stringConstants';
 import {
+	getMyUsername,
 	getReinforcementLearningTrainingVerbosity,
-	getUsername,
 	onPublicServer,
 	onTrainingEnvironment
 } from './utilities/utils';
@@ -16,12 +16,12 @@ export const MUON = 'Muon';
 /**
  * Your username - you shouldn't need to change this.
  */
-export const MY_USERNAME: string = getUsername();
+export const MY_USERNAME: string = getMyUsername();
 
 /**
  * Enable this to build from source including screeps-profiler. (This is separate from Overmind-Profiler.)
  */
-export const USE_PROFILER: boolean = false;
+export const USE_SCREEPS_PROFILER: boolean = false;
 
 /**
  * Profiling is incredibly expensive and can cause the script to time out. By setting this option, you can limit the
@@ -38,6 +38,11 @@ export const PROFILER_INCLUDE_COLONIES: string[] = [/*'E15S49'*/];
  * Enable this to wrap evaluations of constructor, init, and run phase for each colony in try...catch statemenets.
  */
 export const USE_TRY_CATCH: boolean = true;
+
+/**
+ * Enable this to suppress alerts of invalid flag color codes. (Don't do this unless you know what you're doing.)
+ */
+export const SUPPRESS_INVALID_DIRECTIVE_ALERTS: boolean = false;
 
 /**
  * Default controller signature; don't change this.
@@ -66,12 +71,19 @@ export const MAX_OWNED_ROOMS = Infinity;
 export const SHARD3_MAX_OWNED_ROOMS = 3;
 
 /**
+ * The amount of credits that Overmind will try to keep in the bank. Default:
+ * Private servers: 1,000 (will spend aggressively)
+ * Public servers: 100,000 if you are below RCL 10, otherwise 1,000,000.
+ */
+export const RESERVE_CREDITS = onPublicServer() ? (Game.gcl.level >= 10 ? 1e6 : 1e5) : 1000;
+
+/**
  * The global Overmind object will be re-instantiated after this many ticks. In the meantime, refresh() is used.
  */
 export const NEW_OVERMIND_INTERVAL = onPublicServer() ? 20 : 5;
 
 /**
- * Master scale for the RoomVisuals GUI // todo: not plugged in yet
+ * Master scale for the RoomVisuals GUI // TODO: not plugged in yet
  */
 export const GUI_SCALE = 1.0;
 

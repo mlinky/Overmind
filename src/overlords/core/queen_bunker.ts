@@ -3,7 +3,6 @@ import {Colony} from '../../Colony';
 import {log} from '../../console/log';
 import {CreepSetup} from '../../creepSetups/CreepSetup';
 import {Roles, Setups} from '../../creepSetups/setups';
-import {StoreStructure} from '../../declarations/typeGuards';
 import {Hatchery} from '../../hiveClusters/hatchery';
 import {TransportRequest} from '../../logistics/TransportRequestGroup';
 import {Pathing} from '../../movement/Pathing';
@@ -47,8 +46,9 @@ export class BunkerQueenOverlord extends Overlord {
 	room: Room;
 	queens: Zerg[];
 	queenSetup: CreepSetup;
-	storeStructures: StoreStructure[];
+	storeStructures: AnyStoreStructure[];
 	batteries: StructureContainer[];
+	links: StructureLink[]; // hacky workaround for new typings
 	quadrants: { [quadrant: string]: SupplyStructure[] };
 	private numActiveQueens: number;
 	assignments: { [queenName: string]: { [id: string]: boolean } };
@@ -58,7 +58,11 @@ export class BunkerQueenOverlord extends Overlord {
 		this.queenSetup = Setups.queens.default;
 		this.queens = this.zerg(Roles.queen);
 		this.batteries = _.filter(this.room.containers, container => insideBunkerBounds(container.pos, this.colony));
-		this.storeStructures = _.compact([this.colony.terminal!, this.colony.storage!, ...this.batteries]);
+		this.links = _.filter(this.room.links, link => insideBunkerBounds(link.pos, this.colony));
+		this.storeStructures = _.compact([this.colony.terminal!,
+										  this.colony.storage!,
+										  ...this.batteries,
+										  ...this.links]);
 		this.quadrants = {
 			lowerRight: $.structures(this, 'LR',
 									 () => computeQuadrant(this.colony, quadrantFillOrder.lowerRight)),
@@ -159,17 +163,47 @@ export class BunkerQueenOverlord extends Overlord {
 		// Step 3: make withdraw tasks to get the needed resources
 		const withdrawTasks: Task[] = [];
 		const neededResources = _.keys(queenCarry) as ResourceConstant[];
-		// TODO: a single structure doesn't need to have all resources; causes jam if labs need supply but no minerals
-		const targets: StoreStructure[] = _.filter(this.storeStructures, s =>
+		const targets: AnyStoreStructure[] = _.filter(this.storeStructures, s =>
 			_.all(neededResources, resource => (s.store[resource] || 0) >= (queenCarry[resource] || 0)));
-		const withdrawTarget = minBy(targets, target => Pathing.distance(queenPos, target.pos));
-		if (!withdrawTarget) {
-			log.warning(`Could not find adequate withdraw structure for ${queen.print}! ` +
-						`(neededResources: ${neededResources}, queenCarry: ${queenCarry})`);
-			return null;
+		const withdrawTarget = minBy(targets, target => Pathing.distance(queenPos, target.pos) || Infinity);
+		if (withdrawTarget) {
+			for (const resourceType of neededResources) {
+				withdrawTasks.push(Tasks.withdraw(withdrawTarget, resourceType, queenCarry[resourceType]));
+			}
+		} else {
+			const closestTarget = minBy(this.storeStructures,
+										target => Pathing.distance(queenPos, target.pos) || Infinity);
+			if (!closestTarget) {
+				log.error(`Can't seem to find any pathable store structures in ${this.colony.print}`);
+			} else {
+				for (const resourceType of neededResources) {
+					if (closestTarget.store[resourceType] >= queenCarry[resourceType]) {
+						withdrawTasks.push(Tasks.withdraw(closestTarget, resourceType, queenCarry[resourceType]));
+					} else {
+						// TODO ordering tasks for fastest route, maybe a sortby for withdraw targets?
+						const hasResource = _.sortBy(
+							_.filter(this.storeStructures, s => s.store[resourceType] > 0),
+							s => -s.store[resourceType]); // descending sort
+						let collected = 0;
+						for (const storeLoc of hasResource) {
+							// Might be bug in overwithdrawing
+							withdrawTasks.push(Tasks.withdraw(storeLoc, resourceType,
+															  Math.min(queenCarry[resourceType] - collected,
+																	   storeLoc.store[resourceType])));
+							collected += storeLoc.store[resourceType];
+							if (collected >= queenCarry[resourceType]) {
+								break;
+							}
+						}
+					}
+				}
+			}
 		}
-		for (const resourceType of neededResources) {
-			withdrawTasks.push(Tasks.withdraw(withdrawTarget, resourceType, queenCarry[resourceType]));
+
+		if (!withdrawTarget && withdrawTasks.length == 0) {
+			log.warning(`Could not find adequate withdraw structure for ${queen.print}! (neededResources: 
+			${neededResources}, queenCarry: ${JSON.stringify(queenCarry)})`);
+			return null;
 		}
 		// Step 4: put all the tasks in the correct order, set nextPos for each, and chain them together
 		tasks = tasks.concat(withdrawTasks, supplyTasks);
@@ -267,14 +301,29 @@ export class BunkerQueenOverlord extends Overlord {
 
 	private handleQueen(queen: Zerg): void {
 		// Does something need withdrawing?
-		if (this.colony.transportRequests.needsWithdrawing &&
+		if (this.colony.transportRequests.needsWithdrawing() &&
 			_.any(_.keys(this.assignments[queen.name]), id => this.colony.transportRequests.withdrawByID[id])) {
 			queen.task = this.buildWithdrawTaskManifest(queen);
 		}
 		// Does something need supplying?
-		else if (this.colony.transportRequests.needsSupplying &&
+		else if (this.colony.transportRequests.needsSupplying() &&
 				 _.any(_.keys(this.assignments[queen.name]), id => this.colony.transportRequests.supplyByID[id])) {
 			queen.task = this.buildSupplyTaskManifest(queen);
+		}
+		// Do we need safemodes?
+		else if (this.colony.level > 5 && this.colony.controller.safeModeAvailable < 3 &&
+				 this.colony.terminal && this.colony.terminal.store[RESOURCE_GHODIUM] >= 1000 &&
+				 queen.carryCapacity >= 1000) {
+			// Only use 1 queen to avoid adding 2 safemodes
+			if (queen.name == _.first(_.sortBy(this.queens, q => q.name)).name) {
+				queen.task = Tasks.chain([
+											 Tasks.transferAll(this.colony.terminal),
+											 Tasks.withdraw(this.colony.terminal, RESOURCE_GHODIUM, 1000),
+											 Tasks.generateSafeMode(this.colony.controller)
+										 ]);
+				log.alert(`${this.colony.print} has ${this.colony.controller.safeModeAvailable} safemodes avaliable, ` +
+						  `generating a new one`);
+			}
 		}
 		// Otherwise do idle actions
 		if (queen.isIdle) {

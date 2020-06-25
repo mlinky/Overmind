@@ -3,6 +3,9 @@ import {getCacheExpiration} from '../utilities/utils';
 
 const CACHE_TIMEOUT = 50;
 const SHORT_CACHE_TIMEOUT = 10;
+const COSTMATRIX_TIMEOUT = 20;
+const PATH_TIMEOUT = 1000;
+
 
 /**
  * The GlobalCache ($) module saves frequently accessed deserialized objects in temporary, volatile global memory
@@ -38,7 +41,11 @@ export class $ { // $ = cash = cache... get it? :D
 		return _cache.numbers[cacheKey];
 	}
 
-	// TODO: for some reason overloading isn't working here...
+	static numberRecall(saver: { ref: string }, key: string): number | undefined {
+		const cacheKey = saver.ref + '#' + key;
+		return _cache.numbers[cacheKey] as number | undefined;
+	}
+
 	// static pos(saver: { ref: string }, key: string, callback: () => RoomPosition, timeout ?: number): RoomPosition;
 	static pos(saver: { ref: string }, key: string, callback: () => RoomPosition | undefined, timeout?: number):
 		RoomPosition | undefined {
@@ -62,8 +69,12 @@ export class $ { // $ = cash = cache... get it? :D
 		return _cache.lists[cacheKey];
 	}
 
+	/**
+	 * Caches a CostMatrix computation. Times out quickly, but you can use $.costMatrixRecall() to pull the value for
+	 * an invisible room without triggering a recalc
+	 */
 	static costMatrix(roomName: string, key: string, callback: () => CostMatrix,
-					  timeout = SHORT_CACHE_TIMEOUT): CostMatrix {
+					  timeout = COSTMATRIX_TIMEOUT): CostMatrix {
 		const cacheKey = roomName + 'm' + key;
 		if (_cache.costMatrices[cacheKey] == undefined || Game.time > _cache.expiration[cacheKey]) {
 			// Recache if new entry or entry is expired
@@ -73,9 +84,17 @@ export class $ { // $ = cash = cache... get it? :D
 		return _cache.costMatrices[cacheKey];
 	}
 
+	/**
+	 * Returns the value of a previously cached CostMatrix without triggering a cache expiration and recalc
+	 */
 	static costMatrixRecall(roomName: string, key: string): CostMatrix | undefined {
 		const cacheKey = roomName + ':' + key;
 		return _cache.costMatrices[cacheKey];
+	}
+
+	static path(fromPos: RoomPosition, toPos: RoomPosition, opts: any /*todo*/): RoomPosition[] {
+		// TODO
+		return [];
 	}
 
 	static set<T extends HasRef, K extends keyof T>(thing: T, key: K,

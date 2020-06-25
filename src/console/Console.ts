@@ -1,9 +1,14 @@
-import {Colony, ColonyMemory} from '../Colony';
+import {Colony, ColonyMemory, getAllColonies} from '../Colony';
 import {Directive} from '../directives/Directive';
+import {RoomIntel} from '../intel/RoomIntel';
+import {Overlord} from '../overlords/Overlord';
+import {ExpansionEvaluator} from '../strategy/ExpansionEvaluator';
+import {Cartographer} from '../utilities/Cartographer';
+import {EmpireAnalysis} from '../utilities/EmpireAnalysis';
 import {alignedNewline, bullet} from '../utilities/stringConstants';
-import {color, toColumns} from '../utilities/utils';
+import {color, printRoomName, toColumns} from '../utilities/utils';
 import {asciiLogoRL, asciiLogoSmall} from '../visuals/logos';
-import {DEFAULT_OVERMIND_SIGNATURE, MY_USERNAME, USE_PROFILER} from '../~settings';
+import {DEFAULT_OVERMIND_SIGNATURE, MY_USERNAME, USE_SCREEPS_PROFILER} from '../~settings';
 import {log} from './log';
 
 type RecursiveObject = { [key: string]: number | RecursiveObject };
@@ -23,9 +28,12 @@ export class OvermindConsole {
 		global.setSignature = this.setSignature;
 		global.print = this.print;
 		global.timeit = this.timeit;
+		global.profileOverlord = this.profileOverlord;
+		global.finishProfilingOverlord = this.finishProfilingOverlord;
 		global.setLogLevel = log.setLogLevel;
 		global.suspendColony = this.suspendColony;
 		global.unsuspendColony = this.unsuspendColony;
+		global.listSuspendedColonies = this.listSuspendedColonies;
 		global.openRoomPlanner = this.openRoomPlanner;
 		global.closeRoomPlanner = this.closeRoomPlanner;
 		global.cancelRoomPlanner = this.cancelRoomPlanner;
@@ -34,8 +42,10 @@ export class OvermindConsole {
 		global.destroyAllHostileStructures = this.destroyAllHostileStructures;
 		global.destroyAllBarriers = this.destroyAllBarriers;
 		global.listConstructionSites = this.listConstructionSites;
+		global.removeUnbuiltConstructionSites = this.removeUnbuiltConstructionSites;
 		global.listDirectives = this.listDirectives;
 		global.listPersistentDirectives = this.listPersistentDirectives;
+		// global.directiveInfo = this.directiveInfo;
 		global.removeAllLogisticsDirectives = this.removeAllLogisticsDirectives;
 		global.removeFlagsByColor = this.removeFlagsByColor;
 		global.removeErrantFlags = this.removeErrantFlags;
@@ -44,6 +54,11 @@ export class OvermindConsole {
 		global.endRemoteDebugSession = this.endRemoteDebugSession;
 		global.profileMemory = this.profileMemory;
 		global.cancelMarketOrders = this.cancelMarketOrders;
+		global.setRoomUpgradeRate = this.setRoomUpgradeRate;
+		global.getEmpireMineralDistribution = this.getEmpireMineralDistribution;
+		global.listPortals = this.listPortals;
+		global.evaluateOutpostEfficiencies = this.evaluateOutpostEfficiencies;
+		global.evaluatePotentialOutpostEfficiencies = this.evaluatePotentialOutpostEfficiencies;
 	}
 
 	// Help, information, and operational changes ======================================================================
@@ -55,6 +70,7 @@ export class OvermindConsole {
 		}
 		msg += '</font>';
 
+		// Generate a methods description object
 		const descr: { [functionName: string]: string } = {};
 		descr.help = 'show this message';
 		descr['info()'] = 'display version and operation information';
@@ -65,9 +81,12 @@ export class OvermindConsole {
 		descr['debug(thing)'] = 'enable debug logging for a game object or process';
 		descr['stopDebug(thing)'] = 'disable debug logging for a game object or process';
 		descr['timeit(function, repeat=1)'] = 'time the execution of a snippet of code';
+		descr['profileOverlord(overlord, ticks?)'] = 'start profiling on an overlord instance or name';
+		descr['finishProfilingOverlord(overlord)'] = 'stop profiling on an overlord';
 		descr['setLogLevel(int)'] = 'set the logging level from 0 - 4';
 		descr['suspendColony(roomName)'] = 'suspend operations within a colony';
 		descr['unsuspendColony(roomName)'] = 'resume operations within a suspended colony';
+		descr['listSuspendedColonies()'] = 'Prints all suspended colonies';
 		descr['openRoomPlanner(roomName)'] = 'open the room planner for a room';
 		descr['closeRoomPlanner(roomName)'] = 'close the room planner and save changes';
 		descr['cancelRoomPlanner(roomName)'] = 'close the room planner and discard changes';
@@ -76,14 +95,21 @@ export class OvermindConsole {
 		descr['destroyAllHostileStructures(roomName)'] = 'destroys all hostile structures in an owned room';
 		descr['destroyAllBarriers(roomName)'] = 'destroys all ramparts and barriers in a room';
 		descr['listConstructionSites(filter?)'] = 'list all construction sites matching an optional filter';
+		descr['removeUnbuiltConstructionSites()'] = 'removes all construction sites with 0 progress';
 		descr['listDirectives(filter?)'] = 'list directives, matching a filter if specified';
 		descr['listPersistentDirectives()'] = 'print type, name, pos of every persistent directive';
 		descr['removeFlagsByColor(color, secondaryColor)'] = 'remove flags that match the specified colors';
 		descr['removeErrantFlags()'] = 'remove all flags which don\'t match a directive';
 		descr['deepCleanMemory()'] = 'deletes all non-critical portions of memory (be careful!)';
-		descr['profileMemory(depth=1)'] = 'scan through memory to get the size of various objects';
+		descr['profileMemory(root=Memory, depth=1)'] = 'scan through memory to get the size of various objects';
 		descr['startRemoteDebugSession()'] = 'enables the remote debugger so Muon can debug your code';
 		descr['cancelMarketOrders(filter?)'] = 'cancels all market orders matching filter (if provided)';
+		descr['setRoomUpgradeRate(room, upgradeRate)'] = 'changes the rate which a room upgrades at, default is 1';
+		descr['getEmpireMineralDistribution()'] = 'returns current census of colonies and mined sk room minerals';
+		descr['getPortals(rangeFromColonies)'] = 'returns active portals within colony range';
+		descr['evaluateOutpostEfficiencies()'] = 'prints all colony outposts efficiency';
+		descr['evaluatePotentialOutpostEfficiencies()'] = 'prints all nearby unmined outposts';
+
 		// Console list
 		const descrMsg = toColumns(descr, {justify: true, padChar: '.'});
 		const maxLineLength = _.max(_.map(descrMsg, line => line.length)) + 2;
@@ -161,14 +187,14 @@ export class OvermindConsole {
 
 	// Debugging methods ===============================================================================================
 
-	static debug(thing: { name: string, memory: any }): string {
+	static debug(thing: { name?: string, ref?: string, memory: any }): string {
 		thing.memory.debug = true;
-		return `Enabled debugging for ${thing.name}.`;
+		return `Enabled debugging for ${thing.name || thing.ref || '(no name or ref)'}.`;
 	}
 
-	static stopDebug(thing: { name: string, memory: any }): string {
+	static stopDebug(thing: { name?: string, ref?: string, memory: any }): string {
 		delete thing.memory.debug;
-		return `Disabled debugging for ${thing.name}.`;
+		return `Disabled debugging for ${thing.name || thing.ref || '(no name or ref)'}.`;
 	}
 
 	static startRemoteDebugSession(): string {
@@ -182,6 +208,7 @@ export class OvermindConsole {
 	}
 
 	static print(...args: any[]): string {
+		let message = '';
 		for (const arg of args) {
 			let cache: any = [];
 			const msg = JSON.stringify(arg, function(key, value) {
@@ -202,9 +229,9 @@ export class OvermindConsole {
 				return value;
 			}, '\t');
 			cache = null;
-			console.log(msg);
+			message += '\n' + msg;
 		}
-		return 'Done.';
+		return message;
 	}
 
 	static timeit(callback: () => any, repeat = 1): string {
@@ -215,6 +242,29 @@ export class OvermindConsole {
 		}
 		used = Game.cpu.getUsed() - start;
 		return `CPU used: ${used}. Repetitions: ${repeat} (${used / repeat} each).`;
+	}
+
+	// Overlord profiling ==============================================================================================
+	static profileOverlord(overlord: Overlord | string, ticks?: number): string {
+		const overlordInstance = typeof overlord == 'string' ? Overmind.overlords[overlord]
+															 : overlord as Overlord | undefined;
+		if (!overlordInstance) {
+			return `No overlord found for ${overlord}!`;
+		} else {
+			overlordInstance.startProfiling(ticks);
+			return `Profiling ${overlordInstance.print} for ${ticks || 'indefinite'} ticks.`;
+		}
+	}
+
+	static finishProfilingOverlord(overlord: Overlord | string, ticks?: number): string {
+		const overlordInstance = typeof overlord == 'string' ? Overmind.overlords[overlord]
+															 : overlord as Overlord | undefined;
+		if (!overlordInstance) {
+			return `No overlord found for ${overlord}!`;
+		} else {
+			overlordInstance.finishProfiling();
+			return `Profiling ${overlordInstance.print} stopped.`;
+		}
 	}
 
 
@@ -248,6 +298,17 @@ export class OvermindConsole {
 		} else {
 			return `No colony memory for ${roomName}!`;
 		}
+	}
+
+	static listSuspendedColonies(): string {
+		let msg = 'Colonies currently suspended: \n';
+		for (const i in Memory.colonies) {
+			const colonyMemory = Memory.colonies[i] as ColonyMemory | undefined;
+			if (colonyMemory && colonyMemory.suspend == true) {
+				msg += 'Colony ' + i + ' \n';
+			}
+		}
+		return msg;
 	}
 
 	// Room planner control ============================================================================================
@@ -364,7 +425,7 @@ export class OvermindConsole {
 
 	static removeErrantFlags(): string {
 		// This may need to be be run several times depending on visibility
-		if (USE_PROFILER) {
+		if (USE_SCREEPS_PROFILER) {
 			return `ERROR: should not be run while profiling is enabled!`;
 		}
 		let count = 0;
@@ -419,6 +480,121 @@ export class OvermindConsole {
 		return `Destroyed ${room.barriers.length} barriers.`;
 	}
 
+	static removeUnbuiltConstructionSites(): string {
+		let msg = '';
+		for (const id in Game.constructionSites) {
+			const csite = Game.constructionSites[id];
+			if (csite.progress == 0) {
+				const ret = csite.remove();
+				msg += `Removing construction site for ${csite.structureType} with 0% progress at ` +
+					   `${csite.pos.print}; response: ${ret}\n`;
+			}
+		}
+		return msg;
+	}
+
+	// Colony Management =================================================================================================
+
+	static setRoomUpgradeRate(roomName: string, rate: number): string {
+		const colony: Colony = Overmind.colonies[roomName];
+		colony.upgradeSite.memory.speedFactor = rate;
+
+		return `Colony ${roomName} is now upgrading at a rate of ${rate}.`;
+	}
+
+	static getEmpireMineralDistribution(): string {
+		const minerals = EmpireAnalysis.empireMineralDistribution();
+		let ret = 'Empire Mineral Distribution \n';
+		for (const mineral in minerals) {
+			ret += `${mineral}: ${minerals[mineral]} \n`;
+		}
+		return ret;
+	}
+
+	static listPortals(rangeFromColonies: number = 5, includeIntershard: boolean = false): string {
+		const colonies = getAllColonies();
+		const allPortals = colonies.map(colony => RoomIntel.findPortalsInRange(colony.name, rangeFromColonies));
+		let ret = `Empire Portal Census \n`;
+		for (const colonyId in allPortals) {
+			const portals = allPortals[colonyId];
+			if (_.keys(portals).length > 0) {
+				ret += `Colony ${colonies[colonyId].print}: \n`;
+			}
+			for (const portalRoomName of _.keys(portals)) {
+				const samplePortal = _.first(portals[portalRoomName]); // don't need to list all 8 in a room
+				ret += `\t\t Room ${printRoomName(portalRoomName)} Destination ${samplePortal.dest} ` +
+					   `Expiration ${samplePortal[MEM.EXPIRATION] - Game.time}] \n`;
+			}
+		}
+		return ret;
+	}
+
+	static evaluateOutpostEfficiencies(): string {
+		const colonies = getAllColonies();
+		const outpostEfficiencies: {[roomName: string]: number} = {};
+		let avgEnergyPerCPU = 0;
+
+		colonies.forEach(colony => {
+			if (colony.bunker) {
+				colony.outposts.forEach(outpost => {
+					const res = ExpansionEvaluator.computeTheoreticalMiningEfficiency(colony.bunker!.anchor, outpost.name);
+					if (typeof res === 'boolean') {
+						log.error(`Failed on outpost ${outpost.print}`);
+					} else {
+						outpostEfficiencies[outpost.name] = res;
+						avgEnergyPerCPU += res;
+					}
+				});
+			}
+		});
+
+		avgEnergyPerCPU = avgEnergyPerCPU/Object.keys(outpostEfficiencies).length;
+		let ret = `Suspect Outposts +25% below avg efficiency of ${avgEnergyPerCPU}: \n`;
+
+		for (const outpost in outpostEfficiencies) {
+			if (outpostEfficiencies[outpost] < avgEnergyPerCPU*0.75) {
+				ret += `${outpost} ${outpostEfficiencies[outpost]} \n`;
+			}
+		}
+
+		return ret;
+	}
+
+	static evaluatePotentialOutpostEfficiencies(): string {
+		const colonies = getAllColonies();
+		const outpostEfficiencies: {[roomName: string]: number} = {};
+		let avgEnergyPerCPU = 0;
+
+		colonies.forEach(colony => {
+			if (colony.bunker) {
+				Cartographer.findRoomsInRange(colony.name, 2).forEach(outpost => {
+					if (!colony.outposts.map(room => room.name).includes(outpost)) {
+						const res = ExpansionEvaluator.computeTheoreticalMiningEfficiency(colony.bunker!.anchor, outpost);
+						if (typeof res === 'boolean') {
+							log.error(`Failed on outpost ${outpost}`);
+						} else {
+							outpostEfficiencies[outpost] = res;
+							avgEnergyPerCPU += res;
+						}
+					}
+				});
+			}
+		});
+
+		avgEnergyPerCPU = avgEnergyPerCPU/Object.keys(outpostEfficiencies).length;
+		let ret = `Possible new outposts above avg efficiency of ${avgEnergyPerCPU}: \n`;
+
+		for (const outpost in outpostEfficiencies) {
+			// 20E/cpu is a good guideline for an efficient room
+			if (outpostEfficiencies[outpost] > avgEnergyPerCPU*1.25 || outpostEfficiencies[outpost] > 20) {
+				ret += `${outpost} ${outpostEfficiencies[outpost]} \n`;
+			}
+		}
+
+		return ret;
+	}
+
+
 
 	// Memory management ===============================================================================================
 
@@ -439,7 +615,7 @@ export class OvermindConsole {
 			}
 		}
 		// Remove profiler memory
-		delete Memory.profiler;
+		delete Memory.screepsProfiler;
 		// Remove overlords memory from flags
 		for (const i in Memory.flags) {
 			if ((<any>Memory.flags[i]).overlords) {
@@ -469,11 +645,11 @@ export class OvermindConsole {
 		}
 	}
 
-	static profileMemory(depth = 1): string {
+	static profileMemory(root = Memory, depth = 1): string {
 		const sizes: RecursiveObject = {};
 		console.log(`Profiling memory...`);
 		const start = Game.cpu.getUsed();
-		OvermindConsole.recursiveMemoryProfile(Memory, sizes, depth);
+		OvermindConsole.recursiveMemoryProfile(root, sizes, depth);
 		console.log(`Time elapsed: ${Game.cpu.getUsed() - start}`);
 		return JSON.stringify(sizes, undefined, '\t');
 	}

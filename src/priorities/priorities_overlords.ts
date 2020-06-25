@@ -22,12 +22,18 @@ export let OverlordPriority = {
 		destroy         : 300,
 		healPoint       : 301,
 		siege           : 302,
-		controllerAttack: 399
+		controllerAttack: 399,
 	},
 
 	colonization: { 			// Colonizing new rooms
 		claim  : 400,
 		pioneer: 401,
+		remoteUpgrading: 410,
+	},
+
+	priorityOwnedRoom: {		// Situationally prioritized in-room operations
+		priorityUpgrade: 450,
+		priorityTransport: 451,
 	},
 
 	ownedRoom: { 				// Operation of an owned room
@@ -44,20 +50,25 @@ export let OverlordPriority = {
 		guard         : 551,
 	},
 
+	outpostOffense: {
+		harass      : 560,
+		roomPoisoner: 561,
+	},
+
 	maintenance: {				// Used for wall tidying
 		wallDestroy   :580,
 		dismantle     :581,
 	},
 
 	upgrading: {				// Spawning upgraders
-		upgrade: 600,
+		upgrade        : 600,
 	},
-
-	throttleThreshold: 699,  	// Everything past this may be throttled in the event of low CPU
 
 	collectionUrgent: { 		// Collecting resources that are time sensitive, like decaying resources on ground
 		haul: 700
 	},
+
+	throttleThreshold: 799,  	// Everything past this may be throttled in the event of low CPU
 
 	scouting: {
 		stationary  : 800,
@@ -77,8 +88,15 @@ export let OverlordPriority = {
 		roomIncrement: 5,
 	},
 
-	collection: {				// Non-urgent collection of resources, like from a deserted storage
-		haul: 1100
+	powerMine: {
+		cool         : 1050,
+		drill        : 1051,
+		roomIncrement: 5
+	},
+
+	tasks: {				// Non-urgent tasks, such as collection from a deserted storage
+		haul     : 1100,
+		dismantle: 1101
 	},
 
 	default: 99999				// Default overlord priority to ensure it gets run last

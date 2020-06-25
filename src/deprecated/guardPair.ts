@@ -31,12 +31,12 @@
 // 		this.healers = this.combatZerg(HealerSetup.role);
 // 		// Comment out boost lines if you don't want to spawn boosted attackers/healers
 // 		// this.boosts.attacker = [
-// 		// 	boostResources.attack[3],
-// 		// 	boostResources.tough[3],
+// 		// 	BOOST_TIERS.attack[3],
+// 		// 	BOOST_TIERS.tough[3],
 // 		// ];
 // 		// this.boosts.healer = [
-// 		// 	boostResources.heal[3],
-// 		// 	boostResources.tough[3],
+// 		// 	BOOST_TIERS.heal[3],
+// 		// 	BOOST_TIERS.tough[3],
 // 		// ];
 // 	}
 //

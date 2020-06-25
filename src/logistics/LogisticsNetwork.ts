@@ -5,14 +5,7 @@ import {Matcher} from '../algorithms/galeShapley';
 import {Colony} from '../Colony';
 import {log} from '../console/log';
 import {Roles} from '../creepSetups/setups';
-import {
-	EnergyStructure,
-	isEnergyStructure,
-	isResource,
-	isStoreStructure,
-	isTombstone,
-	StoreStructure
-} from '../declarations/typeGuards';
+import {isResource, isRuin, isTombstone,} from '../declarations/typeGuards';
 import {Mem} from '../memory/Memory';
 import {Pathing} from '../movement/Pathing';
 import {profile} from '../profiler/decorator';
@@ -20,11 +13,18 @@ import {minMax} from '../utilities/utils';
 import {Zerg} from '../zerg/Zerg';
 
 export type LogisticsTarget =
-	EnergyStructure
-	| StoreStructure
+	StructureContainer
+	| StructureExtension
+	| StructureFactory
 	| StructureLab
+	| StructureLink
 	| StructureNuker
 	| StructurePowerSpawn
+	| StructureSpawn
+	| StructureStorage
+	| StructureTerminal
+	| StructureTower
+	| Ruin
 	| Tombstone
 	| Resource;
 
@@ -59,9 +59,9 @@ interface LogisticsNetworkMemory {
 	};
 }
 
-const LogisticsNetworkMemoryDefaults: LogisticsNetworkMemory = {
+const getDefaultLogisticsMemory: () => LogisticsNetworkMemory = () => ({
 	transporterCache: {},
-};
+});
 
 /**
  * Logistics network: efficiently partners resource requests with transporters using a stable matching algorithm to
@@ -81,7 +81,7 @@ export class LogisticsNetwork {
 	// private logisticPositions: { [roomName: string]: RoomPosition[] };
 	private cache: {
 		nextAvailability: { [transporterName: string]: [number, RoomPosition] },
-		predictedTransporterCarry: { [transporterName: string]: StoreDefinition },
+		predictedTransporterCarry: { [transporterName: string]: { [resourceType: string]: number } },
 		resourceChangeRate: { [requestID: string]: { [transporterName: string]: number } },
 	};
 	static settings = {
@@ -92,7 +92,7 @@ export class LogisticsNetwork {
 	};
 
 	constructor(colony: Colony) {
-		this.memory = Mem.wrap(colony.memory, 'logisticsNetwork', LogisticsNetworkMemoryDefaults);
+		this.memory = Mem.wrap(colony.memory, 'logisticsNetwork', getDefaultLogisticsMemory);
 		this.requests = [];
 		this.targetToRequest = {};
 		this.colony = colony;
@@ -112,7 +112,7 @@ export class LogisticsNetwork {
 	}
 
 	refresh(): void {
-		this.memory = Mem.wrap(this.colony.memory, 'logisticsNetwork', LogisticsNetworkMemoryDefaults);
+		this.memory = Mem.wrap(this.colony.memory, 'logisticsNetwork', getDefaultLogisticsMemory);
 		this.requests = [];
 		this.targetToRequest = {};
 		this._matching = undefined;
@@ -168,7 +168,7 @@ export class LogisticsNetwork {
 			multiplier  : 1,
 			dAmountdt   : 0,
 		});
-		if (opts.resourceType == 'all' && (isStoreStructure(target) || isTombstone(target))) {
+		if (opts.resourceType == 'all' && !isResource(target)) {
 			if (_.sum(target.store) == target.store.energy) {
 				opts.resourceType = RESOURCE_ENERGY; // convert "all" requests to energy if that's all they have
 			}
@@ -195,10 +195,9 @@ export class LogisticsNetwork {
 	/**
 	 * Requests output for every mineral in a requestor object
 	 */
-	requestOutputMinerals(target: StoreStructure, opts = {} as RequestOptions): void {
-		for (const resourceType in target.store) {
+	requestOutputMinerals(target: Exclude<LogisticsTarget, Resource>, opts = {} as RequestOptions): void {
+		for (const [resourceType, amount] of target.store.contents) {
 			if (resourceType == RESOURCE_ENERGY) continue;
-			const amount = target.store[<ResourceConstant>resourceType] || 0;
 			if (amount > 0) {
 				opts.resourceType = <ResourceConstant>resourceType;
 				this.requestOutput(target, opts);
@@ -210,87 +209,99 @@ export class LogisticsNetwork {
 		// if (target instanceof DirectivePickup) {
 		// 	return target.storeCapacity - _.sum(target.store);
 		// } else
-		if (isResource(target) || isTombstone(target)) {
+		if (isResource(target) || isTombstone(target) || isRuin(target)) {
 			log.error(`Improper logistics request: should not request input for resource or tombstone!`);
 			return 0;
-		} else if (isStoreStructure(target)) {
-			return target.storeCapacity - _.sum(target.store);
-		} else if (isEnergyStructure(target) && resourceType == RESOURCE_ENERGY) {
-			return target.energyCapacity - target.energy;
 		}
-		// else if (target instanceof Zerg) {
-		// 	return target.carryCapacity - _.sum(target.carry);
+
+		// @ts-ignore
+		return target.store.getFreeCapacity(resourceType) || 0;
+
+		// else if (isStoreStructure(target)) {
+		// 	return target.storeCapacity - _.sum(target.store);
+		// } else if (isEnergyStructure(target) && resourceType == RESOURCE_ENERGY) {
+		// 	return target.energyCapacity - target.energy;
 		// }
-		else {
-			if (target instanceof StructureLab) {
-				if (resourceType == target.mineralType) {
-					return target.mineralCapacity - target.mineralAmount;
-				} else if (resourceType == RESOURCE_ENERGY) {
-					return target.energyCapacity - target.energy;
-				}
-			} else if (target instanceof StructureNuker) {
-				if (resourceType == RESOURCE_GHODIUM) {
-					return target.ghodiumCapacity - target.ghodium;
-				} else if (resourceType == RESOURCE_ENERGY) {
-					return target.energyCapacity - target.energy;
-				}
-			} else if (target instanceof StructurePowerSpawn) {
-				if (resourceType == RESOURCE_POWER) {
-					return target.powerCapacity - target.power;
-				} else if (resourceType == RESOURCE_ENERGY) {
-					return target.energyCapacity - target.energy;
-				}
-			}
-		}
-		log.warning('Could not determine input amount!');
-		return 0;
+		// // else if (target instanceof Zerg) {
+		// // 	return target.carryCapacity - _.sum(target.carry);
+		// // }
+		// else {
+		// 	if (target instanceof StructureLab) {
+		// 		if (resourceType == target.mineralType) {
+		// 			return target.mineralCapacity - target.mineralAmount;
+		// 		} else if (resourceType == RESOURCE_ENERGY) {
+		// 			return target.energyCapacity - target.energy;
+		// 		}
+		// 	} else if (target instanceof StructureNuker) {
+		// 		if (resourceType == RESOURCE_GHODIUM) {
+		// 			return target.ghodiumCapacity - target.ghodium;
+		// 		} else if (resourceType == RESOURCE_ENERGY) {
+		// 			return target.energyCapacity - target.energy;
+		// 		}
+		// 	} else if (target instanceof StructurePowerSpawn) {
+		// 		if (resourceType == RESOURCE_POWER) {
+		// 			return target.powerCapacity - target.power;
+		// 		} else if (resourceType == RESOURCE_ENERGY) {
+		// 			return target.energyCapacity - target.energy;
+		// 		}
+		// 	}
+		// }
+		// log.warning('Could not determine input amount!');
+		// return 0;
 	}
 
 	private getOutputAmount(target: LogisticsTarget, resourceType: ResourceConstant | 'all'): number {
 		if (resourceType == 'all') {
-			if (isTombstone(target) || isStoreStructure(target)) {
-				return _.sum(target.store);
-			} else {
+			if (isResource(target)) {
 				log.error(ALL_RESOURCE_TYPE_ERROR);
 				return 0;
+			} else {
+				// @ts-ignore
+				return target.store.getUsedCapacity();
 			}
 		} else {
 			if (isResource(target)) {
 				return target.amount;
-			} else if (isTombstone(target)) {
-				return target.store[resourceType] || 0;
-			} else if (isStoreStructure(target)) {
-				return target.store[resourceType] || 0;
-			} else if (isEnergyStructure(target) && resourceType == RESOURCE_ENERGY) {
-				return target.energy;
+			} else {
+				// @ts-ignore
+				return target.store.getUsedCapacity(resourceType);
 			}
-			// else if (target instanceof Zerg) {
-			// 	return target.carry[resourceType]!;
+
+			// Legacy code
+			// else if (isTombstone(target)) {
+			// 	return target.store[resourceType] || 0;
+			// } else if (isStoreStructure(target)) {
+			// 	return target.store[resourceType] || 0;
+			// } else if (isEnergyStructure(target) && resourceType == RESOURCE_ENERGY) {
+			// 	return target.energy;
 			// }
-			else {
-				if (target instanceof StructureLab) {
-					if (resourceType == target.mineralType) {
-						return target.mineralAmount;
-					} else if (resourceType == RESOURCE_ENERGY) {
-						return target.energy;
-					}
-				} else if (target instanceof StructureNuker) {
-					if (resourceType == RESOURCE_GHODIUM) {
-						return target.ghodium;
-					} else if (resourceType == RESOURCE_ENERGY) {
-						return target.energy;
-					}
-				} else if (target instanceof StructurePowerSpawn) {
-					if (resourceType == RESOURCE_POWER) {
-						return target.power;
-					} else if (resourceType == RESOURCE_ENERGY) {
-						return target.energy;
-					}
-				}
-			}
+			// // else if (target instanceof Zerg) {
+			// // 	return target.carry[resourceType]!;
+			// // }
+			// else {
+			// 	if (target instanceof StructureLab) {
+			// 		if (resourceType == target.mineralType) {
+			// 			return target.mineralAmount;
+			// 		} else if (resourceType == RESOURCE_ENERGY) {
+			// 			return target.energy;
+			// 		}
+			// 	} else if (target instanceof StructureNuker) {
+			// 		if (resourceType == RESOURCE_GHODIUM) {
+			// 			return target.ghodium;
+			// 		} else if (resourceType == RESOURCE_ENERGY) {
+			// 			return target.energy;
+			// 		}
+			// 	} else if (target instanceof StructurePowerSpawn) {
+			// 		if (resourceType == RESOURCE_POWER) {
+			// 			return target.power;
+			// 		} else if (resourceType == RESOURCE_ENERGY) {
+			// 			return target.energy;
+			// 		}
+			// 	}
+			// }
 		}
-		log.warning('Could not determine output amount!');
-		return 0;
+		// log.warning('Could not determine output amount!');
+		// return 0;
 	}
 
 	// Transporter availability and predictive functions ===============================================================
@@ -350,7 +361,7 @@ export class LogisticsNetwork {
 	 * Returns the predicted state of the transporter's carry after completing its current task
 	 */
 	private computePredictedTransporterCarry(transporter: Zerg,
-											 nextAvailability?: [number, RoomPosition]): StoreDefinition {
+											 nextAvailability?: [number, RoomPosition]): { [resourceType: string]: number } {
 		if (transporter.task && transporter.task.target) {
 			const requestID = this.targetToRequest[transporter.task.target.ref];
 			if (requestID) {
@@ -361,13 +372,12 @@ export class LogisticsNetwork {
 					const resourceAmount = -1 * this.predictedRequestAmount(transporter, request, nextAvailability);
 					// ^ need to multiply amount by -1 since transporter is doing complement of what request needs
 					if (request.resourceType == 'all') {
-						if (!isStoreStructure(request.target) && !isTombstone(request.target)) {
+						if (isResource(request.target)) {
 							log.error(ALL_RESOURCE_TYPE_ERROR);
 							return {energy: 0} as StoreDefinition;
 						}
-						for (const resourceType in request.target.store) {
-							const resourceFraction = (request.target.store[<ResourceConstant>resourceType] || 0)
-												   / _.sum(request.target.store);
+						for (const [resourceType, storeAmt] of request.target.store.contents) {
+							const resourceFraction = storeAmt / _.sum(request.target.store);
 							if (carry[resourceType]) {
 								carry[resourceType]! += resourceAmount * resourceFraction;
 								carry[resourceType] = minMax(carry[resourceType]!, 0, remainingCapacity);
@@ -393,7 +403,7 @@ export class LogisticsNetwork {
 	/**
 	 * Returns the predicted state of the transporter's carry after completing its task
 	 */
-	private predictedTransporterCarry(transporter: Zerg): StoreDefinition {
+	private predictedTransporterCarry(transporter: Zerg): { [resourceType: string]: number } {
 		if (!this.cache.predictedTransporterCarry[transporter.name]) {
 			this.cache.predictedTransporterCarry[transporter.name] = this.computePredictedTransporterCarry(transporter);
 		}
@@ -423,24 +433,33 @@ export class LogisticsNetwork {
 		// 										   transporter => this.nextAvailability(transporter)[0] < eta);
 		if (request.amount > 0) { // input state, resources into target
 			let predictedAmount = request.amount + predictedDifference;
-			if (isStoreStructure(request.target)) { 	// cap predicted amount at storeCapacity
-				predictedAmount = Math.min(predictedAmount, request.target.storeCapacity);
-			} else if (isEnergyStructure(request.target)) {
-				predictedAmount = Math.min(predictedAmount, request.target.energyCapacity);
+			// if (isStoreStructure(request.target)) { 	// cap predicted amount at storeCapacity
+			// 	predictedAmount = Math.min(predictedAmount, request.target.storeCapacity);
+			// } else if (isEnergyStructure(request.target)) {
+			// 	predictedAmount = Math.min(predictedAmount, request.target.energyCapacity);
+			// }
+
+			if (!isResource(request.target)) {
+				// @ts-ignore
+				predictedAmount = minMax(predictedAmount, 0, request.target.store.getCapacity(request.resourceType));
 			}
 			const resourceInflux = _.sum(_.map(otherTargetingTransporters,
-											 other => (other.carry[<ResourceConstant>request.resourceType] || 0)));
+											   other => (other.carry[<ResourceConstant>request.resourceType] || 0)));
 			predictedAmount = Math.max(predictedAmount - resourceInflux, 0);
 			return predictedAmount;
 		} else { // output state, resources withdrawn from target
 			let predictedAmount = request.amount + predictedDifference;
-			if (isStoreStructure(request.target)) { 	// cap predicted amount at -1 * storeCapacity
-				predictedAmount = Math.max(predictedAmount, -1 * request.target.storeCapacity);
-			} else if (isEnergyStructure(request.target)) {
-				predictedAmount = Math.min(predictedAmount, -1 * request.target.energyCapacity);
+			// if (isStoreStructure(request.target)) { 	// cap predicted amount at -1 * storeCapacity
+			// 	predictedAmount = Math.max(predictedAmount, -1 * request.target.storeCapacity);
+			// } else if (isEnergyStructure(request.target)) {
+			// 	predictedAmount = Math.min(predictedAmount, -1 * request.target.energyCapacity);
+			// }
+			if (!isResource(request.target)) {
+				// @ts-ignore
+				predictedAmount = minMax(predictedAmount, -1 * request.target.store.getCapacity(request.resourceType), 0);
 			}
 			const resourceOutflux = _.sum(_.map(otherTargetingTransporters,
-											  other => other.carryCapacity - _.sum(other.carry)));
+												other => other.carryCapacity - _.sum(other.carry)));
 			predictedAmount = Math.min(predictedAmount + resourceOutflux, 0);
 			return predictedAmount;
 		}
@@ -459,7 +478,7 @@ export class LogisticsNetwork {
 		const [ticksUntilFree, newPos] = this.nextAvailability(transporter);
 		const choices: { dQ: number, dt: number, targetRef: string }[] = [];
 		const amount = this.predictedRequestAmount(transporter, request, [ticksUntilFree, newPos]);
-		let carry: StoreDefinition;
+		let carry: { [resourceType: string]: number };
 		if (!transporter.task || transporter.task.target != request.target) {
 			// If you are not targeting the requestor, use predicted carry after completing current task
 			carry = this.predictedTransporterCarry(transporter);
@@ -489,7 +508,7 @@ export class LogisticsNetwork {
 			for (const buffer of this.buffers) {
 				const dQ_buffer = Math.min(amount, transporter.carryCapacity, buffer.store[request.resourceType] || 0);
 				const dt_buffer = newPos.getMultiRoomRangeTo(buffer.pos) * LogisticsNetwork.settings.rangeToPathHeuristic
-								+ Pathing.distance(buffer.pos, request.target.pos) + ticksUntilFree;
+								  + (Pathing.distance(buffer.pos, request.target.pos) || Infinity) + ticksUntilFree;
 				choices.push({
 								 dQ       : dQ_buffer,
 								 dt       : dt_buffer,
@@ -501,7 +520,7 @@ export class LogisticsNetwork {
 			const remainingCarryCapacity = transporter.carryCapacity - _.sum(carry);
 			const dQ_direct = Math.min(Math.abs(amount), remainingCarryCapacity);
 			const dt_direct = newPos.getMultiRoomRangeTo(request.target.pos)
-							* LogisticsNetwork.settings.rangeToPathHeuristic + ticksUntilFree;
+							  * LogisticsNetwork.settings.rangeToPathHeuristic + ticksUntilFree;
 			choices.push({
 							 dQ       : dQ_direct,
 							 dt       : dt_direct,
@@ -513,9 +532,9 @@ export class LogisticsNetwork {
 			// Change in resources if transporter drops off resources at a buffer first
 			for (const buffer of this.buffers) {
 				const dQ_buffer = Math.min(Math.abs(amount), transporter.carryCapacity,
-										 buffer.storeCapacity - _.sum(buffer.store));
+										   buffer.storeCapacity - _.sum(buffer.store));
 				const dt_buffer = newPos.getMultiRoomRangeTo(buffer.pos) * LogisticsNetwork.settings.rangeToPathHeuristic
-								  + Pathing.distance(buffer.pos, request.target.pos) + ticksUntilFree;
+								  + (Pathing.distance(buffer.pos, request.target.pos) || Infinity) + ticksUntilFree;
 				choices.push({
 								 dQ       : dQ_buffer,
 								 dt       : dt_buffer,
@@ -589,7 +608,7 @@ export class LogisticsNetwork {
 		const requests = this.requests.slice();
 		const transporters = _.filter(this.colony.getCreepsByRole(Roles.transport), creep => !creep.spawning);
 		const unmatchedTransporters = _.remove(transporters,
-											 transporter => !_.keys(this._matching).includes(transporter.name));
+											   transporter => !_.keys(this._matching).includes(transporter.name));
 		const unmatchedRequests = _.remove(requests, request => !_.values(this._matching).includes(request));
 		console.log(`Stable matching for ${this.colony.name} at ${Game.time}`);
 		for (const transporter of transporters) {
@@ -617,10 +636,12 @@ export class LogisticsNetwork {
 		let info = [];
 		for (const request of this.requests) {
 			let targetType: string;
-			if (request.target instanceof Resource) {
+			if (isResource(request.target)) {
 				targetType = 'resource';
-			} else if (request.target instanceof Tombstone) {
+			} else if (isTombstone(request.target)) {
 				targetType = 'tombstone';
+			} else if (isRuin(request.target)) {
+				targetType = 'ruin';
 			} else {
 				targetType = request.target.structureType;
 			}
@@ -629,16 +650,16 @@ export class LogisticsNetwork {
 				amount = request.target.amount;
 			} else {
 				if (request.resourceType == 'all') {
-					if (isTombstone(request.target) || isStoreStructure(request.target)) {
+					if (!isResource(request.target)) {
 						amount = _.sum(request.target.store);
-					} else if (isEnergyStructure(request.target)) {
+					} else {
 						amount = -0.001;
 					}
 				} else {
-					if (isTombstone(request.target) || isStoreStructure(request.target)) {
-						amount = request.target.store[request.resourceType] || 0;
-					} else if (isEnergyStructure(request.target)) {
-						amount = request.target.energy;
+					if (isResource(request.target)) {
+						amount = request.target.amount;
+					} else {
+						amount = request.target.store[request.resourceType];
 					}
 				}
 
@@ -658,7 +679,7 @@ export class LogisticsNetwork {
 		for (const transporter of this.colony.overlords.logistics.transporters) {
 			const task = transporter.task ? transporter.task.name : 'none';
 			const target = transporter.task ?
-						 transporter.task.proto._target.ref + ' ' + transporter.task.targetPos.printPlain : 'none';
+						   transporter.task.proto._target.ref + ' ' + transporter.task.targetPos.printPlain : 'none';
 			const nextAvailability = this.nextAvailability(transporter);
 			info.push({
 						  creep       : transporter.name,

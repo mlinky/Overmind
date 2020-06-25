@@ -31,7 +31,7 @@ export class TaskRecharge extends Task {
 			&& obj.id == creep.colony.hatchery.battery.id && creep.roleName != 'queen') {
 			return false; // only queens can use the hatchery battery
 		}
-		let amount = isResource(obj) ? obj.amount : obj.energy;
+		let amount = isResource(obj) ? obj.amount : obj.store[RESOURCE_ENERGY];
 		if (amount < this.data.minEnergy) {
 			return false;
 		}
@@ -57,18 +57,20 @@ export class TaskRecharge extends Task {
 			this.parent!.creep = creep;
 		}
 		// Choose the target to maximize your energy gain subject to other targeting workers
-		const target = creep.colony && creep.inColonyRoom
-					   ? maxBy(creep.colony.rechargeables, o => this.rechargeRateForCreep(creep, o))
-					   : maxBy(creep.room.rechargeables, o => this.rechargeRateForCreep(creep, o));
+		const possibleTargets = creep.colony && creep.inColonyRoom ? creep.colony.rechargeables
+																   : creep.room.rechargeables;
+
+		const target = maxBy(possibleTargets, o => this.rechargeRateForCreep(creep, o));
 		if (!target || creep.pos.getMultiRoomRangeTo(target.pos) > 40) {
 			// workers shouldn't harvest; let drones do it (disabling this check can destabilize early economy)
 			const canHarvest = creep.getActiveBodyparts(WORK) > 0 && creep.roleName != 'worker';
 			if (canHarvest) {
 				// Harvest from a source if there is no recharge target available
 				const availableSources = _.filter(creep.room.sources, function(source) {
+					const filledSource = source.energy > 0 || source.ticksToRegeneration < 20;
 					// Only harvest from sources which aren't surrounded by creeps excluding yourself
 					const isSurrounded = source.pos.availableNeighbors(false).length == 0;
-					return !isSurrounded || creep.pos.isNearTo(source);
+					return filledSource && (!isSurrounded || creep.pos.isNearTo(source));
 				});
 				const availableSource = creep.pos.findClosestByMultiRoomRange(availableSources);
 				if (availableSource) {

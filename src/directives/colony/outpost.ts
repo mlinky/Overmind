@@ -7,7 +7,7 @@ import {Cartographer, ROOMTYPE_CONTROLLER} from '../../utilities/Cartographer';
 import {Directive} from '../Directive';
 
 /**
- * Claims a new room and incubates it from the nearest (or specified) colony
+ * Registers an unowned mining outpost for a nearby colony
  */
 @profile
 export class DirectiveOutpost extends Directive {
@@ -40,7 +40,7 @@ export class DirectiveOutpost extends Directive {
 			this.remove();
 		}
 		if (Game.time % 10 == 3 && this.room && this.room.controller
-			&& !this.pos.isEqualTo(this.room.controller.pos) && !this.memory.setPosition) {
+			&& !this.pos.isEqualTo(this.room.controller.pos) && !this.memory.setPos) {
 			this.setPosition(this.room.controller.pos);
 		}
 	}

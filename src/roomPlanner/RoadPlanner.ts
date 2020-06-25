@@ -4,12 +4,14 @@ import {log} from '../console/log';
 import {Mem} from '../memory/Memory';
 import {MatrixTypes, Pathing} from '../movement/Pathing';
 import {profile} from '../profiler/decorator';
-import {getCacheExpiration, onPublicServer} from '../utilities/utils';
+import {packCoord, packCoordList, unpackCoordListAsPosList} from '../utilities/packrat';
+import {getCacheExpiration, onPublicServer, posFromReadableName} from '../utilities/utils';
 import {Visualizer} from '../visuals/Visualizer';
 import {RoomPlanner} from './RoomPlanner';
 
 export interface RoadPlannerMemory {
-	roadLookup: { [roomName: string]: { [roadCoordName: string]: boolean } };
+	roadCoordsPacked: { [roomName: string]: string };
+	// roadLookup: { [roomName: string]: { [roadCoordName: string]: boolean } };
 	roadCoverage: number;
 	roadCoverages: {
 		[destination: string]: {
@@ -20,29 +22,30 @@ export interface RoadPlannerMemory {
 	};
 }
 
-const PLAIN_COST = 3;
-const SWAMP_COST = 4;
-const WALL_COST = 15 * PLAIN_COST;
-const EXISTING_PATH_COST = PLAIN_COST - 1;
+const ROAD_PLANNER_PLAIN_COST = 3;
+const ROAD_PLANNER_SWAMP_COST = 4;
+const ROAD_PLANNER_TUNNEL_COST = 15 * ROAD_PLANNER_PLAIN_COST;
+const EXISTING_PATH_COST = ROAD_PLANNER_PLAIN_COST - 1;
 
-const memoryDefaults: RoadPlannerMemory = {
-	roadLookup   : {},
-	roadCoverage : 0.0,
-	roadCoverages: {}
-};
+const getDefaultRoadPlannerMemory: () => RoadPlannerMemory = () => ({
+	roadCoordsPacked: {},
+	roadCoverage    : 0.0,
+	roadCoverages   : {}
+});
 
 @profile
 export class RoadPlanner {
 
-	roomPlanner: RoomPlanner;
-	colony: Colony;
-	memory: RoadPlannerMemory;
-	roadPositions: RoomPosition[];
-	costMatrices: { [roomName: string]: CostMatrix };
+	private roomPlanner: RoomPlanner;
+	private colony: Colony;
+	private memory: RoadPlannerMemory;
+	private roadPositions: RoomPosition[];
+	private costMatrices: { [roomName: string]: CostMatrix };
+	private _roadLookup: ((pos: RoomPosition) => boolean) | undefined;
 
 	static settings = {
 		encourageRoadMerging          : true,
-		recalculateRoadNetworkInterval: onPublicServer() ? 3000 : 1000, // recalculate road networks this often
+		recalculateRoadNetworkInterval: onPublicServer() ? 1000 : 250, // recalculate road networks this often
 		recomputeCoverageInterval     : onPublicServer() ? 1000 : 500,	// recompute coverage to each destination this often
 		buildRoadsAtRCL               : 4,
 	};
@@ -50,13 +53,13 @@ export class RoadPlanner {
 	constructor(roomPlanner: RoomPlanner) {
 		this.roomPlanner = roomPlanner;
 		this.colony = roomPlanner.colony;
-		this.memory = Mem.wrap(this.colony.memory, 'roadPlanner', memoryDefaults);
+		this.memory = Mem.wrap(this.colony.memory, 'roadPlanner', getDefaultRoadPlannerMemory);
 		this.costMatrices = {};
 		this.roadPositions = [];
 	}
 
 	refresh(): void {
-		this.memory = Mem.wrap(this.colony.memory, 'roadPlanner', memoryDefaults);
+		this.memory = Mem.wrap(this.colony.memory, 'roadPlanner', getDefaultRoadPlannerMemory);
 		this.costMatrices = {};
 		this.roadPositions = [];
 	}
@@ -65,45 +68,61 @@ export class RoadPlanner {
 		return this.memory.roadCoverage;
 	}
 
-	private recomputeRoadCoverages(storagePos: RoomPosition) {
+	private recomputeRoadCoverages(storagePos: RoomPosition, ignoreInactiveRooms = true) {
 		// Compute coverage for each path
 		for (const destination of this.colony.destinations) {
-			const destName = destination.pos.name;
-			if (!this.memory.roadCoverages[destName] || Game.time > this.memory.roadCoverages[destName].exp) {
-				const roadCoverage = this.computeRoadCoverage(storagePos, destination.pos);
-				if (roadCoverage != undefined) {
-					// Set expiration to be longer if road is nearly complete
-					const expiration = roadCoverage.roadCount / roadCoverage.length >= 0.75
-									 ? getCacheExpiration(RoadPlanner.settings.recomputeCoverageInterval)
-									 : getCacheExpiration(3 * RoadPlanner.settings.recomputeCoverageInterval);
-					this.memory.roadCoverages[destName] = {
-						roadCount: roadCoverage.roadCount,
-						length   : roadCoverage.length,
-						exp      : expiration
-					};
-				} else {
-					if (this.memory.roadCoverages[destName]) {
-						// if you already have some data, use it for a little while
-						const waitTime = onPublicServer() ? 500 : 200;
-						this.memory.roadCoverages[destName].exp += waitTime;
-					} else {
-						// otherwise put in a placeholder
-						const waitTime = onPublicServer() ? 300 : 100;
+
+			const destName = destination.pos.readableName;
+
+			if (!!this.memory.roadCoordsPacked[destination.pos.roomName]) {
+
+				if (!this.memory.roadCoverages[destName] || Game.time > this.memory.roadCoverages[destName].exp) {
+
+					const roadCoverage = this.computeRoadCoverage(storagePos, destination.pos);
+
+					if (roadCoverage != undefined) {
+						// Set expiration to be longer if road is nearly complete
+						const expiration = roadCoverage.roadCount / roadCoverage.length >= 0.75
+										   ? getCacheExpiration(RoadPlanner.settings.recomputeCoverageInterval)
+										   : getCacheExpiration(3 * RoadPlanner.settings.recomputeCoverageInterval);
 						this.memory.roadCoverages[destName] = {
-							roadCount: 0,
-							length   : 1,
-							exp      : Game.time + waitTime
+							roadCount: roadCoverage.roadCount,
+							length   : roadCoverage.length,
+							exp      : expiration
 						};
+
+					} else {
+
+						if (this.memory.roadCoverages[destName]) {
+							// if you already have some data, use it for a little while
+							const waitTime = onPublicServer() ? 500 : 200;
+							this.memory.roadCoverages[destName].exp += waitTime;
+						} else {
+							// otherwise put in a placeholder
+							const waitTime = onPublicServer() ? 300 : 100;
+							this.memory.roadCoverages[destName] = {
+								roadCount: 0,
+								length   : 1,
+								exp      : Game.time + waitTime
+							};
+						}
+
 					}
+
+					log.debug(`Recomputing road coverage from ${storagePos.print} to ${destination.pos.print}... ` +
+							  `Coverage: ${JSON.stringify(roadCoverage)}`);
 				}
-				log.debug(`Recomputing road coverage from ${storagePos.print} to ${destination.pos.print}... ` +
-						  `Coverage: ${JSON.stringify(roadCoverage)}`);
+
 			}
 		}
 		// Store the aggregate roadCoverage score
 		let totalRoadCount = 0;
 		let totalPathLength = 0;
 		for (const destName in this.memory.roadCoverages) {
+			const destPos = posFromReadableName(destName)!;
+			if (ignoreInactiveRooms && !this.colony.isRoomActive(destPos.roomName)) {
+				continue;
+			}
 			const {roadCount, length, exp} = this.memory.roadCoverages[destName];
 			totalRoadCount += roadCount;
 			totalPathLength += length;
@@ -174,16 +193,16 @@ export class RoadPlanner {
 			for (let x = 0; x < 50; ++x) {
 				switch (terrain.get(x, y)) {
 					case TERRAIN_MASK_SWAMP:
-						matrix.set(x, y, SWAMP_COST);
+						matrix.set(x, y, ROAD_PLANNER_SWAMP_COST);
 						break;
 					case TERRAIN_MASK_WALL:
 						if (x != 0 && y != 0 && x != 49 && y != 49) {
 							// Can't tunnel through walls on edge tiles
-							matrix.set(x, y, WALL_COST);
+							matrix.set(x, y, ROAD_PLANNER_TUNNEL_COST);
 						}
 						break;
 					default: // plain
-						matrix.set(x, y, PLAIN_COST);
+						matrix.set(x, y, ROAD_PLANNER_PLAIN_COST);
 						break;
 				}
 			}
@@ -284,11 +303,10 @@ export class RoadPlanner {
 			}
 		}
 		const allRoadPos: RoomPosition[] = _.compact(this.roadPositions.concat(roomPlannerRoads));
-		// Encode the coordinates of the road as keys in a truthy hash table for fast lookup
-		this.memory.roadLookup = {};
-		for (const pos of allRoadPos) {
-			if (!this.memory.roadLookup[pos.roomName]) this.memory.roadLookup[pos.roomName] = {};
-			this.memory.roadLookup[pos.roomName][pos.coordName] = true;
+		const allRoadPosByRoomName = _.groupBy(allRoadPos, pos => pos.roomName);
+		this.memory.roadCoordsPacked = {};
+		for (const roomName in allRoadPosByRoomName) {
+			this.memory.roadCoordsPacked[roomName] = packCoordList(allRoadPosByRoomName[roomName]);
 		}
 	}
 
@@ -313,12 +331,10 @@ export class RoadPlanner {
 		// Max buildings that can be placed each tick
 		let count = RoomPlanner.settings.maxSitesPerColony - this.colony.constructionSites.length;
 		// Build missing roads
-		let roadPositions = [];
-		for (const roomName in this.memory.roadLookup) {
-			for (const coords of _.keys(this.memory.roadLookup[roomName])) {
-				const [x, y] = coords.split(':');
-				roadPositions.push(new RoomPosition(parseInt(x, 10), parseInt(y, 10), roomName));
-			}
+		let roadPositions: RoomPosition[] = [];
+		for (const roomName in this.memory.roadCoordsPacked) {
+			roadPositions = roadPositions.concat(
+				unpackCoordListAsPosList(this.memory.roadCoordsPacked[roomName], roomName));
 		}
 		const origin = (this.colony.storage || this.colony.hatchery || this.colony).pos;
 		roadPositions = _.sortBy(roadPositions, pos => pos.getMultiRoomRangeTo(origin));
@@ -326,7 +342,22 @@ export class RoadPlanner {
 			if (count > 0 && RoomPlanner.canBuild(STRUCTURE_ROAD, pos)) {
 				const ret = pos.createConstructionSite(STRUCTURE_ROAD);
 				if (ret != OK) {
-					log.warning(`${this.colony.name}: couldn't create road site at ${pos.print}. Result: ${ret}`);
+					if (ret == ERR_NOT_OWNER) {
+						if (Game.time % 50 == 0) {
+							log.warning(`${this.colony.print}: couldn't create road site at ${pos.print}; room is ` +
+										`reserved/owned by hostile forces!`);
+						}
+					} else if (ret == ERR_FULL) {
+						// For some reason, when you place a construction site, the last check they run to see if
+						// you're already at max placed sites searches through EVERY SINGLE GAME OBJECT you have
+						// access to, which is quite expensive! Don't try to make a bunch more of these or you'll
+						// murder your CPU.
+						log.warning(`${this.colony.print}: couldn't create road site at ${pos.print}, too many ` +
+									`construction sites!`);
+						break;
+					} else {
+						log.warning(`${this.colony.print}: couldn't create road site at ${pos.print}. Result: ${ret}`);
+					}
 				} else {
 					count--;
 				}
@@ -334,13 +365,42 @@ export class RoadPlanner {
 		}
 	}
 
-	/* Quick lookup for if a road should be in this position. Roads returning false won't be maintained. */
+	/**
+	 * Quick lookup for if a road should be in this position. Roads returning false won't be maintained.
+	 */
 	roadShouldBeHere(pos: RoomPosition): boolean {
-		// Initial migration code, can delete later
-		if (this.memory.roadLookup[pos.roomName]) {
-			return this.memory.roadLookup[pos.roomName][pos.coordName];
+		if (this._roadLookup == undefined) {
+			this._roadLookup = _.memoize(
+				(p: RoomPosition) => (this.memory.roadCoordsPacked[p.roomName] || '').includes(packCoord(p)));
 		}
-		return false;
+		return this._roadLookup(pos);
+	}
+
+	/**
+	 * Enumerate the positions in a room which should have roads on them
+	 */
+	getRoadPositions(roomName: string): RoomPosition[] {
+		if (this.memory.roadCoordsPacked[roomName]) {
+			return unpackCoordListAsPosList(this.memory.roadCoordsPacked[roomName], roomName);
+		} else {
+			return [];
+		}
+	}
+
+	/* Clean up leftover road coverage locations from remotes that aren't mined or old structures */
+	private cleanRoadCoverage() {
+		const colonyDestinations = this.colony.destinations.map(dest => `${dest.pos.roomName}:${dest.pos.x}:${dest.pos.y}`);
+		console.log(`Colony ${this.colony.print} has destinations of ${JSON.stringify(colonyDestinations)}`);
+
+		for (const roadCoverageKey of Object.keys(this.memory.roadCoverages)) {
+			// console.log(`Colony ${this.colony.name} Road coverage of ${roadCoverageKey}`);
+			if (colonyDestinations.includes(roadCoverageKey)) {
+				// console.log(`Colony has destination of ${roadCoverageKey}`);
+			} else {
+				console.log(`Colony does not have destination of ${roadCoverageKey}, deleting.`);
+				delete this.memory.roadCoverages[roadCoverageKey];
+			}
+		}
 	}
 
 	run(): void {
@@ -353,6 +413,7 @@ export class RoadPlanner {
 			// Once in a blue moon, recalculate the entire network and write to memory to keep it up to date
 			if (Game.time % RoadPlanner.settings.recalculateRoadNetworkInterval == this.colony.id) {
 				if (this.roomPlanner.storagePos) {
+					this.cleanRoadCoverage();
 					this.recalculateRoadNetwork(this.roomPlanner.storagePos, this.roomPlanner.getObstacles());
 				}
 			}

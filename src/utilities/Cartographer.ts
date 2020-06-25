@@ -1,9 +1,15 @@
+import {log} from '../console/log';
 import {profile} from '../profiler/decorator';
 
 export const ROOMTYPE_SOURCEKEEPER = 'SK';
 export const ROOMTYPE_CORE = 'CORE';
 export const ROOMTYPE_CONTROLLER = 'CTRL';
 export const ROOMTYPE_ALLEY = 'ALLEY';
+export const ROOMTYPE_CROSSROAD = 'CROSSROAD';
+
+export type RoomType = 'SK' | 'CORE' | 'CTRL' | 'ALLEY' | 'CROSSROAD';
+
+PERMACACHE.cartographerRoomTypes = PERMACACHE.cartographerRoomTypes || {};
 
 /**
  * Cartographer: provides helper methods related to Game.map. A few of these methods have been modified from BonzAI
@@ -13,14 +19,14 @@ export const ROOMTYPE_ALLEY = 'ALLEY';
 export class Cartographer {
 
 	/**
-	 * Lists all rooms up to a given distance away, including roomName
+	 * Lists all rooms up to and including a given distance away, including roomName
 	 */
 	static findRoomsInRange(roomName: string, depth: number): string[] {
 		return _.flatten(_.values(this.recursiveRoomSearch(roomName, depth)));
 	}
 
 	/**
-	 * Lists all rooms up at a given distance away, including roomName
+	 * Lists all rooms at exactly a given distance away, including roomName
 	 */
 	static findRoomsAtRange(roomName: string, depth: number): string[] {
 		return this.recursiveRoomSearch(roomName, depth)[depth];
@@ -67,17 +73,24 @@ export class Cartographer {
 	/**
 	 * Get the type of the room
 	 */
-	static roomType(roomName: string): 'SK' | 'CORE' | 'CTRL' | 'ALLEY' {
-		const coords = this.getRoomCoordinates(roomName);
-		if (coords.x % 10 === 0 || coords.y % 10 === 0) {
-			return ROOMTYPE_ALLEY;
-		} else if (coords.x % 10 != 0 && coords.x % 5 === 0 && coords.y % 10 != 0 && coords.y % 5 === 0) {
-			return ROOMTYPE_CORE;
-		} else if (coords.x % 10 <= 6 && coords.x % 10 >= 4 && coords.y % 10 <= 6 && coords.y % 10 >= 4) {
-			return ROOMTYPE_SOURCEKEEPER;
-		} else {
-			return ROOMTYPE_CONTROLLER;
+	static roomType(roomName: string): RoomType {
+		if (!PERMACACHE.cartographerRoomTypes[roomName]) {
+			let roomType: RoomType;
+			const coords = Cartographer.getRoomCoordinates(roomName);
+			if (coords.x % 10 === 0 && coords.y % 10 === 0) {
+				roomType = ROOMTYPE_CROSSROAD;
+			} else if (coords.x % 10 === 0 || coords.y % 10 === 0) {
+				roomType = ROOMTYPE_ALLEY;
+			} else if (coords.x % 10 != 0 && coords.x % 5 === 0 && coords.y % 10 != 0 && coords.y % 5 === 0) {
+				roomType = ROOMTYPE_CORE;
+			} else if (coords.x % 10 <= 6 && coords.x % 10 >= 4 && coords.y % 10 <= 6 && coords.y % 10 >= 4) {
+				roomType = ROOMTYPE_SOURCEKEEPER;
+			} else {
+				roomType = ROOMTYPE_CONTROLLER;
+			}
+			PERMACACHE.cartographerRoomTypes[roomName] = roomType;
 		}
+		return PERMACACHE.cartographerRoomTypes[roomName];
 	}
 
 	/**
@@ -214,4 +227,27 @@ export class Cartographer {
 		};
 	}
 
+	// static isNoviceRoom(roomName: string): boolean {
+	// 	if (Memory.zoneRooms) {
+	// 		const roomInfo = Memory.zoneRooms[roomName];
+	// 		return !!roomInfo && !!roomInfo.novice;
+	// 	} else {
+	// 		log.alert(`Checking novice room before segment is set in ${roomName}!`);
+	// 		return false;
+	// 	}
+	// }
+	//
+	// static isRespawnRoom(roomName: string): boolean {
+	// 	if (Memory.zoneRooms) {
+	// 		const roomInfo = Memory.zoneRooms[roomName];
+	// 		return !!roomInfo && !!roomInfo.respawnArea;
+	// 	} else {
+	// 		log.alert(`Checking respawn room before segment is set in ${roomName}!`);
+	// 		return false;
+	// 	}
+	// }
+
 }
+
+// Register on global for debugging
+global.Cartographer = Cartographer;

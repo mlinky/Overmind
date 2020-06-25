@@ -1,5 +1,7 @@
+import {MatrixLib} from '../matrix/MatrixLib';
 import {profile} from '../profiler/decorator';
 import {StructureLayout, StructureMap} from '../roomPlanner/RoomPlanner';
+import {rgbToHex} from '../utilities/utils';
 import {asciiLogo, logoComponents, logoText} from './logos';
 
 
@@ -34,6 +36,14 @@ export class Visualizer {
 			opacity: 0.5,
 		});
 		return new RoomVisual(pos.roomName).circle(pos.x, pos.y, opts);
+	}
+
+	static rect(pos: RoomPosition, color = 'red', opts = {}): RoomVisual {
+		_.defaults(opts, {
+			fill   : color,
+			opacity: 0.5,
+		});
+		return new RoomVisual(pos.roomName).rect(pos.x, pos.y, 1, 1, opts);
 	}
 
 	static marker(pos: RoomPosition, opts = {}): RoomVisual {
@@ -88,32 +98,37 @@ export class Visualizer {
 		}
 	}
 
-	static displayCostMatrix(costMatrix: CostMatrix, roomName?: string, dots = true, color = '#ff0000'): void {
+	static displayCostMatrix(matrix: CostMatrix, roomName?: string,
+							 opts = {dots: true, displayZero: true}): void {
+
+		opts = _.defaults(opts, {dots: true, displayZero: true});
 
 		const vis = new RoomVisual(roomName);
-		let x, y: number;
+		let x, y, cost, percentOfMax: number;
+		let color: string;
 
-		if (dots) {
-			let cost: number;
-			let max = 1;
+		const maxVal = MatrixLib.getMaxValue(matrix) + 1;
+
+		if (opts.dots) {
 			for (y = 0; y < 50; ++y) {
 				for (x = 0; x < 50; ++x) {
-					max = Math.max(max, costMatrix.get(x, y));
-				}
-			}
-
-			for (y = 0; y < 50; ++y) {
-				for (x = 0; x < 50; ++x) {
-					cost = costMatrix.get(x, y);
+					cost = matrix.get(x, y);
 					if (cost > 0) {
-						vis.circle(x, y, {radius: costMatrix.get(x, y) / max / 2, fill: color});
+						percentOfMax = Math.round(255 * cost / maxVal);
+						color = rgbToHex(255, 255 - percentOfMax, 255 - percentOfMax);
+						vis.circle(x, y, {radius: matrix.get(x, y) / maxVal / 2, fill: color});
 					}
 				}
 			}
 		} else {
 			for (y = 0; y < 50; ++y) {
 				for (x = 0; x < 50; ++x) {
-					vis.text(costMatrix.get(x, y).toString(), x, y, {color: color});
+					cost = matrix.get(x, y);
+					if (opts.displayZero || cost != 0) {
+						percentOfMax = Math.round(255 * cost / maxVal);
+						color = rgbToHex(255, 255 - percentOfMax, 255 - percentOfMax);
+						vis.text(matrix.get(x, y).toString(), x, y, {color: color});
+					}
 				}
 			}
 		}
@@ -277,6 +292,8 @@ export class Visualizer {
 						.poly(logoText.I.points, logoText.I.style)
 						.poly(logoText.N.points, logoText.N.style)
 						.poly(logoText.D.points, logoText.D.style);
+		Visualizer.text(`Colonies: ${_.keys(Overmind.colonies).length} | Creeps: ${_.keys(Game.creeps).length}`,
+						{x: 1, y: 10}, .93);
 	}
 
 	static drawNotifications(notificationMessages: string[]): void {
@@ -305,18 +322,11 @@ export class Visualizer {
 		this.barGraph(Game.gcl.progress / Game.gcl.progressTotal, {x: 2.75, y: 9});
 	}
 
-	static summary(): void {
-		this.text(`Colonies: ${_.keys(Overmind.colonies).length} | Creeps: ${_.keys(Game.creeps).length}`, {
-			x: 1,
-			y: 10
-		}, .93);
-	}
 
 	// This typically takes about 0.3-0.6 CPU in total
 	static visuals(): void {
 		this.drawLogo();
 		this.drawGraphs();
 		// this.drawNotifications();
-		this.summary();
 	}
 }

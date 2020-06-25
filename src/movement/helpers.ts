@@ -1,18 +1,12 @@
-import {hasPos} from '../declarations/typeGuards';
-
 /**
  * Returns destination.pos if destination has a position, or destination if destination is a RoomPosition
  */
 export function normalizePos(destination: HasPos | RoomPosition): RoomPosition {
-	if (hasPos(destination)) {
-		return destination.pos;
-	} else {
-		return destination;
-	}
+	return (<any>destination).pos || destination;
 }
 
 /**
- * Returns if the coordinate is on an exit tile
+ * Returns if the coordinate is at the edge of a room. Does not explicitly check if the position is an exit tile.
  */
 export function isExit(pos: Coord): boolean {
 	return pos.x == 0 || pos.y == 0 || pos.x == 49 || pos.y == 49;
@@ -34,8 +28,8 @@ export function getCreepWeightInfo(creep: Creep, analyzeCarry = true): { move: n
 	const bodyParts = _.countBy(creep.body, p => _.contains(unweightedParts, p.type) ? p.type : 'weighted');
 	bodyParts.move = bodyParts.move || 0;
 	bodyParts.weighted = bodyParts.weighted || 0;
-	if (bodyParts[CARRY]) {
-		bodyParts.weighted += Math.ceil(_.sum(creep.carry) / CARRY_CAPACITY);
+	if (analyzeCarry && bodyParts[CARRY]) {
+		bodyParts.weighted += Math.ceil(bodyParts[CARRY] * creep.store.getUsedCapacity() / creep.store.getCapacity());
 	}
 	// Account for boosts
 	for (const part of creep.body) {
@@ -51,10 +45,10 @@ export function getCreepWeightInfo(creep: Creep, analyzeCarry = true): { move: n
  */
 export function getTerrainCosts(creep: Creep): { plainCost: number, swampCost: number } {
 	const data = getCreepWeightInfo(creep);
-	const ratio = data.weighted / data.move;
+	const fatigueRatio = data.weighted / data.move;
 	return {
-		plainCost: Math.ceil(ratio),
-		swampCost: 5 * Math.ceil(ratio),
+		plainCost: Math.max(Math.ceil(fatigueRatio), 1),
+		swampCost: Math.max(Math.ceil(5 * fatigueRatio), 1),
 	};
 }
 

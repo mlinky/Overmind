@@ -8,25 +8,33 @@ import {DirectiveIncubate} from './colony/incubate';
 import {DirectiveOutpost} from './colony/outpost';
 import {DirectiveSKOutpost} from './colony/outpostSK';
 import {DirectiveTargetDismantle } from './colony/targetDismantle';
+import {DirectivePoisonRoom} from './colony/poisonRoom';
 import {DirectiveGuard} from './defense/guard';
 import {DirectiveInvasionDefense} from './defense/invasionDefense';
 import {DirectiveOutpostDefense} from './defense/outpostDefense';
 import {Directive} from './Directive';
 import {DirectiveControllerAttack} from './offense/controllerAttack';
+import {DirectiveHarass} from './offense/harass';
 import {DirectivePairDestroy} from './offense/pairDestroy';
 import {DirectiveSwarmDestroy} from './offense/swarmDestroy';
 import {DirectiveWallDestroy} from './offense/wallDestroy';
+import {DirectiveBaseOperator} from './powerCreeps/baseOperator';
 import {DirectiveExtract} from './resource/extract';
 import {DirectiveHarvest} from './resource/harvest';
 import {DirectiveHaul} from './resource/haul';
+import {DirectivePowerMine} from './resource/powerMine';
 import {DirectiveRPBunker} from './roomPlanner/roomPlanner_bunker';
 import {DirectiveRPCommandCenter} from './roomPlanner/roomPlanner_commandCenter';
 import {DirectiveRPHatchery} from './roomPlanner/roomPlanner_hatchery';
 import {DirectiveBootstrap} from './situational/bootstrap';
 import {DirectiveNukeResponse} from './situational/nukeResponse';
+import {DirectiveNukeTarget} from './situational/nukeTarget';
+import {DirectivePortalScout} from './situational/portalScout';
+import {DirectiveRemoteUpgrade} from './situational/remoteUpgrade';
+import {DirectiveStronghold} from './situational/stronghold';
 import {DirectiveDismantle} from './targeting/dismantle';
+import {DirectiveModularDismantle} from './targeting/modularDismantle';
 import {DirectiveTargetSiege} from './targeting/siegeTarget';
-import {DirectiveTerminalEmergencyState} from './terminalState/terminalState_emergency';
 import {DirectiveTerminalEvacuateState} from './terminalState/terminalState_evacuate';
 import {DirectiveTerminalRebuildState} from './terminalState/terminalState_rebuild';
 
@@ -53,7 +61,8 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 				case COLOR_BLUE:
 					return new DirectiveTargetDismantle(flag);
 				case COLOR_RED:
-					return new DirectiveBulkDismantle(flag);				}
+					return new DirectivePoisonRoom(flag);
+			}
 			break;
 
 		// Offensive combat directives =================================================================================
@@ -67,6 +76,8 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 					return new DirectiveControllerAttack(flag);
 				case COLOR_BLUE:
 					return new DirectiveWallDestroy(flag);			
+				case COLOR_WHITE:
+					return new DirectiveHarass(flag);
 			}
 			break;
 		
@@ -110,6 +121,14 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 					return new DirectiveBootstrap(flag);
 				case COLOR_BLUE:
 					return new DirectiveNukeResponse(flag);
+				case COLOR_RED:
+					return new DirectiveNukeTarget(flag);
+				case COLOR_PURPLE:
+					return new DirectiveStronghold(flag);
+				case COLOR_WHITE:
+					return new DirectivePortalScout(flag);
+				case COLOR_YELLOW:
+					return new DirectiveRemoteUpgrade(flag);
 			}
 			break;
 
@@ -122,6 +141,8 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 					return new DirectiveExtract(flag);
 				case COLOR_BLUE:
 					return new DirectiveHaul(flag);
+				case COLOR_RED:
+					return new DirectivePowerMine(flag);
 			}
 			break;
 
@@ -130,8 +151,8 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 			switch (flag.secondaryColor) {
 				case COLOR_RED:
 					return new DirectiveTerminalEvacuateState(flag);
-				case COLOR_ORANGE:
-					return new DirectiveTerminalEmergencyState(flag);
+				// case COLOR_ORANGE:
+				// 	return new DirectiveTerminalEmergencyState(flag);
 				case COLOR_YELLOW:
 					return new DirectiveTerminalRebuildState(flag);
 			}
@@ -144,6 +165,8 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 					return new DirectiveTargetSiege(flag);
 				case COLOR_YELLOW:
 					return new DirectiveDismantle(flag);
+				case COLOR_CYAN:
+					return new DirectiveModularDismantle(flag);
 			}
 			break;
 
@@ -156,6 +179,14 @@ export function DirectiveWrapper(flag: Flag): Directive | undefined {
 					return new DirectiveRPCommandCenter(flag);
 				case COLOR_RED:
 					return new DirectiveRPBunker(flag);
+			}
+			break;
+
+		// Power directives ====================================================================================
+		case COLOR_CYAN:
+			switch (flag.secondaryColor) {
+				case COLOR_PURPLE:
+					return new DirectiveBaseOperator(flag);
 			}
 			break;
 	}

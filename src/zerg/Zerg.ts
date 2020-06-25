@@ -1,60 +1,25 @@
-import {Colony} from '../Colony';
 import {log} from '../console/log';
-import {isCreep, isZerg} from '../declarations/typeGuards';
+import {isCreep, isPowerCreep, isStandardZerg} from '../declarations/typeGuards';
 import {CombatIntel} from '../intel/CombatIntel';
-import {Movement, MoveOptions} from '../movement/Movement';
 import {Overlord} from '../overlords/Overlord';
 import {profile} from '../profiler/decorator';
+import {BOOST_PARTS} from '../resources/map_resources';
 import {initializeTask} from '../tasks/initializer';
+import {MIN_LIFETIME_FOR_BOOST} from '../tasks/instances/getBoosted';
 import {Task} from '../tasks/Task';
-import {NEW_OVERMIND_INTERVAL} from '../~settings';
+import {AnyZerg} from './AnyZerg';
 
-export function getOverlord(creep: Zerg | Creep): Overlord | null {
-	if (creep.memory[_MEM.OVERLORD]) {
-		return Overmind.overlords[creep.memory[_MEM.OVERLORD]!] || null;
-	} else {
-		return null;
-	}
-}
 
-export function setOverlord(creep: Zerg | Creep, newOverlord: Overlord | null) {
-	// Remove cache references to old assignments
-	const roleName = creep.memory.role;
-	const ref = creep.memory[_MEM.OVERLORD];
-	const oldOverlord: Overlord | null = ref ? Overmind.overlords[ref] : null;
-	if (ref && Overmind.cache.overlords[ref] && Overmind.cache.overlords[ref][roleName]) {
-		_.remove(Overmind.cache.overlords[ref][roleName], name => name == creep.name);
-	}
-	if (newOverlord) {
-		// Change to the new overlord's colony
-		creep.memory[_MEM.COLONY] = newOverlord.colony.name;
-		// Change assignments in memory
-		creep.memory[_MEM.OVERLORD] = newOverlord.ref;
-		// Update the cache references
-		if (!Overmind.cache.overlords[newOverlord.ref]) {
-			Overmind.cache.overlords[newOverlord.ref] = {};
-		}
-		if (!Overmind.cache.overlords[newOverlord.ref][roleName]) {
-			Overmind.cache.overlords[newOverlord.ref][roleName] = [];
-		}
-		Overmind.cache.overlords[newOverlord.ref][roleName].push(creep.name);
-	} else {
-		creep.memory[_MEM.OVERLORD] = null;
-	}
-	if (oldOverlord) oldOverlord.recalculateCreeps();
-	if (newOverlord) newOverlord.recalculateCreeps();
-}
-
-export function normalizeZerg(creep: Zerg | Creep): Zerg | Creep {
+export function normalizeStandardZerg(creep: Zerg | Creep): Zerg | Creep {
 	return Overmind.zerg[creep.name] || creep;
 }
 
 export function toCreep(creep: Zerg | Creep): Creep {
-	return isZerg(creep) ? creep.creep : creep;
+	return isStandardZerg(creep) ? creep.creep : creep;
 }
 
 // Last pipeline is more complex because it depends on the energy a creep has; sidelining this for now
-const actionPipelines: string[][] = [
+const ACTION_PIPELINES: string[][] = [
 	['harvest', 'attack', 'build', 'repair', 'dismantle', 'attackController', 'rangedHeal', 'heal'],
 	['rangedAttack', 'rangedMassAttack', 'build', 'repair', 'rangedHeal'],
 	// ['upgradeController', 'build', 'repair', 'withdraw', 'transfer', 'drop'],
@@ -82,14 +47,17 @@ const RANGES = {
 
 /**
  * The Zerg class is a wrapper for owned creeps and contains all wrapped creep methods and many additional methods for
- * direct control of a creep.
+ * direct control of a creep. As of April 2020, this class now extends the AnyZerg class to accommodate the introduction
+ * of power creeps into the game.
  */
 @profile
-export class Zerg {
+export class Zerg extends AnyZerg {
 
+	isStandardZerg: true;
 	creep: Creep; 						// The creep that this wrapper class will control
 	body: BodyPartDefinition[];    	 	// These properties are all wrapped from this.creep.* to this.*
 	carry: StoreDefinition;				// |
+	store: StoreDefinition; 			// |
 	carryCapacity: number;				// |
 	fatigue: number;					// |
 	hits: number;						// |
@@ -109,75 +77,78 @@ export class Zerg {
 	lifetime: number;
 	actionLog: { [actionName: string]: boolean }; // Tracks the actions that a creep has completed this tick
 	blockMovement: boolean; 			// Whether the zerg is allowed to move or not
-	private _task: Task | null; 		// Cached Task object that is instantiated once per tick and on change
+
+	// Cached properties
+	private _task: Task | null;
+	private _neededBoosts: { [boostResource: string]: number } | undefined;
 
 	constructor(creep: Creep, notifyWhenAttacked = true) {
+		super(creep, notifyWhenAttacked);
+		this.isStandardZerg = true;
 		// Copy over creep references
-		this.creep = creep;
+		// this.creep = creep;
 		this.body = creep.body;
-		this.carry = creep.carry;
-		this.carryCapacity = creep.carryCapacity;
+		// this.carry = creep.carry;
+		// this.store = creep.store;
+		// this.carryCapacity = creep.carryCapacity;
 		this.fatigue = creep.fatigue;
-		this.hits = creep.hits;
-		this.hitsMax = creep.hitsMax;
-		this.id = creep.id;
-		this.memory = creep.memory;
-		this.name = creep.name;
-		this.pos = creep.pos;
-		this.nextPos = creep.pos;
-		this.ref = creep.ref;
+		// this.hits = creep.hits;
+		// this.hitsMax = creep.hitsMax;
+		// this.id = creep.id;
+		// this.memory = creep.memory;
+		// this.name = creep.name;
+		// this.pos = creep.pos;
+		// this.nextPos = creep.pos;
+		// this.ref = creep.ref;
 		this.roleName = creep.memory.role;
-		this.room = creep.room;
-		this.saying = creep.saying;
+		// this.room = creep.room;
+		// this.saying = creep.saying;
 		this.spawning = creep.spawning;
-		this.ticksToLive = creep.ticksToLive;
+		// this.ticksToLive = creep.ticksToLive;
 		// Extra properties
-		this.lifetime = this.getBodyparts(CLAIM) > 0 ? CREEP_CLAIM_LIFE_TIME : CREEP_LIFE_TIME;
-		this.actionLog = {};
-		this.blockMovement = false;
+		// this.lifetime = this.getBodyparts(CLAIM) > 0 ? CREEP_CLAIM_LIFE_TIME : CREEP_LIFE_TIME;
+		// this.actionLog = {};
+		// this.blockMovement = false;
 		// Register global references
 		Overmind.zerg[this.name] = this;
-		global[this.name] = this;
+		// global[this.name] = this;
 		// Handle attack notification when at lifetime - 1
-		if (!notifyWhenAttacked && (this.ticksToLive || 0) >= this.lifetime - (NEW_OVERMIND_INTERVAL + 1)) {
-			// creep.notifyWhenAttacked only uses the 0.2CPU intent cost if it changes the intent value
-			this.notifyWhenAttacked(notifyWhenAttacked);
-		}
+		// if (!notifyWhenAttacked && (this.ticksToLive || 0) >= this.lifetime - (NEW_OVERMIND_INTERVAL + 1)) {
+		// 	// creep.notifyWhenAttacked only uses the 0.2CPU intent cost if it changes the intent value
+		// 	this.notifyWhenAttacked(notifyWhenAttacked);
+		// }
 	}
 
 	/**
 	 * Refresh all changeable properties of the creep or delete from Overmind and global when dead
 	 */
 	refresh(): void {
+		super.refresh();
 		const creep = Game.creeps[this.name];
 		if (creep) {
-			this.creep = creep;
-			this.pos = creep.pos;
-			this.nextPos = creep.pos;
+			// this.creep = creep;
+			// this.pos = creep.pos;
+			// this.nextPos = creep.pos;
 			this.body = creep.body;
-			this.carry = creep.carry;
-			this.carryCapacity = creep.carryCapacity;
+			// this.carry = creep.carry;
+			// this.store = creep.store;
+			// this.carryCapacity = creep.carryCapacity;
 			this.fatigue = creep.fatigue;
-			this.hits = creep.hits;
-			this.memory = creep.memory;
+			// this.hits = creep.hits;
+			// this.memory = creep.memory;
 			this.roleName = creep.memory.role;
-			this.room = creep.room;
-			this.saying = creep.saying;
+			// this.room = creep.room;
+			// this.saying = creep.saying;
 			this.spawning = creep.spawning;
-			this.ticksToLive = creep.ticksToLive;
-			this.actionLog = {};
-			this.blockMovement = false;
+			// this.ticksToLive = creep.ticksToLive;
+			// this.actionLog = {};
+			// this.blockMovement = false;
 			this._task = null; // todo
+			this._neededBoosts = undefined;
 		} else {
-			log.debug(`Deleting from global`);
+			// log.debug(`Deleting from global`);
 			delete Overmind.zerg[this.name];
-			delete global[this.name];
-		}
-	}
-
-	debug(...args: any[]) {
-		if (this.memory.debug) {
-			log.debug(this.print, args);
+			// delete global[this.name];
 		}
 	}
 
@@ -193,19 +164,17 @@ export class Zerg {
 		}
 	}
 
-	get print(): string {
-		return '<a href="#!/room/' + Game.shard.name + '/' + this.pos.roomName + '">[' + this.name + ']</a>';
-	}
-
 	// Wrapped creep methods ===========================================================================================
 
-	attack(target: Creep | Structure) {
+	attack(target: AnyCreep | Structure) {
 		const result = this.creep.attack(target);
 		if (result == OK) {
 			this.actionLog.attack = true;
-			if (isCreep(target)) {
+			if (isCreep(target) || isPowerCreep(target)) {
 				if (target.hitsPredicted == undefined) target.hitsPredicted = target.hits;
 				target.hitsPredicted -= CombatIntel.predictedDamageAmount(this.creep, target, 'attack');
+			}
+			if (isCreep(target)) {
 				// account for hitback effects
 				if (this.creep.hitsPredicted == undefined) this.creep.hitsPredicted = this.creep.hits;
 				this.creep.hitsPredicted -= CombatIntel.predictedDamageAmount(target, this.creep, 'attack');
@@ -228,22 +197,23 @@ export class Zerg {
 	}
 
 	goBuild(target: ConstructionSite) {
-		if (this.pos.inRangeToPos(target.pos, RANGES.BUILD)) {
-			return this.build(target);
-		} else {
-			return this.goTo(target);
+		if (this.build(target) == ERR_NOT_IN_RANGE) {
+			this.goTo(target);
 		}
 	}
 
-	cancelOrder(methodName: string): OK | ERR_NOT_FOUND {
-		const result = this.creep.cancelOrder(methodName);
-		if (result == OK) this.actionLog[methodName] = false;
-		return result;
-	}
+	// cancelOrder(methodName: string): OK | ERR_NOT_OWNER | ERR_BUSY | ERR_NOT_FOUND {
+	// 	const result = this.creep.cancelOrder(methodName);
+	// 	if (result == OK) this.actionLog[methodName] = false;
+	// 	return result;
+	// }
 
 	claimController(controller: StructureController) {
 		const result = this.creep.claimController(controller);
 		if (!this.actionLog.claimController) this.actionLog.claimController = (result == OK);
+		if (result == OK) {
+			Overmind.shouldBuild = true; // rebuild the overmind object on the next tick to account for new room
+		}
 		return result;
 	}
 
@@ -253,19 +223,19 @@ export class Zerg {
 		return result;
 	}
 
-	drop(resourceType: ResourceConstant, amount?: number) {
-		const result = this.creep.drop(resourceType, amount);
-		if (!this.actionLog.drop) this.actionLog.drop = (result == OK);
-		return result;
-	}
+	// drop(resourceType: ResourceConstant, amount?: number) {
+	// 	const result = this.creep.drop(resourceType, amount);
+	// 	if (!this.actionLog.drop) this.actionLog.drop = (result == OK);
+	// 	return result;
+	// }
 
-	goDrop(pos: RoomPosition, resourceType: ResourceConstant, amount?: number) {
-		if (this.pos.inRangeToPos(pos, RANGES.DROP)) {
-			return this.drop(resourceType, amount);
-		} else {
-			return this.goTo(pos);
-		}
-	}
+	// goDrop(pos: RoomPosition, resourceType: ResourceConstant, amount?: number) {
+	// 	if (this.pos.inRangeToPos(pos, RANGES.DROP)) {
+	// 		return this.drop(resourceType, amount);
+	// 	} else {
+	// 		return this.goTo(pos);
+	// 	}
+	// }
 
 	generateSafeMode(target: StructureController) {
 		return this.creep.generateSafeMode(target);
@@ -277,36 +247,34 @@ export class Zerg {
 		return result;
 	}
 
-	goHarvest(source: Source | Mineral) {
-		if (this.pos.inRangeToPos(source.pos, RANGES.HARVEST)) {
-			return this.harvest(source);
-		} else {
-			return this.goTo(source);
+	goHarvest(source: Source | Mineral): void {
+		if (this.harvest(source) == ERR_NOT_IN_RANGE) {
+			this.goTo(source);
 		}
 	}
 
-	move(direction: DirectionConstant, force = false) {
-		if (!this.blockMovement && !force) {
-			const result = this.creep.move(direction);
-			if (result == OK) {
-				if (!this.actionLog.move) this.actionLog.move = true;
-				this.nextPos = this.pos.getPositionAtDirection(direction);
-			}
-			return result;
-		} else {
-			return ERR_BUSY;
-		}
-	}
+	// move(direction: DirectionConstant, force = false) {
+	// 	if (!this.blockMovement && !force) {
+	// 		const result = this.creep.move(direction);
+	// 		if (result == OK) {
+	// 			if (!this.actionLog.move) this.actionLog.move = true;
+	// 			this.nextPos = this.pos.getPositionAtDirection(direction);
+	// 		}
+	// 		return result;
+	// 	} else {
+	// 		return ERR_BUSY;
+	// 	}
+	// }
 
-	notifyWhenAttacked(enabled: boolean) {
-		return this.creep.notifyWhenAttacked(enabled);
-	}
+	// notifyWhenAttacked(enabled: boolean) {
+	// 	return this.creep.notifyWhenAttacked(enabled);
+	// }
 
-	pickup(resource: Resource) {
-		const result = this.creep.pickup(resource);
-		if (!this.actionLog.pickup) this.actionLog.pickup = (result == OK);
-		return result;
-	}
+	// pickup(resource: Resource) {
+	// 	const result = this.creep.pickup(resource);
+	// 	if (!this.actionLog.pickup) this.actionLog.pickup = (result == OK);
+	// 	return result;
+	// }
 
 	rangedAttack(target: Creep | Structure) {
 		const result = this.creep.rangedAttack(target);
@@ -340,11 +308,9 @@ export class Zerg {
 		return result;
 	}
 
-	goRepair(target: Structure) {
-		if (this.pos.inRangeToPos(target.pos, RANGES.REPAIR)) {
-			return this.repair(target);
-		} else {
-			return this.goTo(target);
+	goRepair(target: Structure): void {
+		if (this.repair(target) == ERR_NOT_IN_RANGE) {
+			this.goTo(target);
 		}
 	}
 
@@ -354,10 +320,10 @@ export class Zerg {
 		return result;
 	}
 
-	/* Say a message; maximum message length is 10 characters */
-	say(message: string, pub?: boolean) {
-		return this.creep.say(message, pub);
-	}
+	// /* Say a message; maximum message length is 10 characters */
+	// say(message: string, pub?: boolean) {
+	// 	return this.creep.say(message, pub);
+	// }
 
 	signController(target: StructureController, text: string) {
 		const result = this.creep.signController(target, text);
@@ -365,9 +331,9 @@ export class Zerg {
 		return result;
 	}
 
-	suicide() {
-		return this.creep.suicide();
-	}
+	// suicide() {
+	// 	return this.creep.suicide();
+	// }
 
 	upgradeController(controller: StructureController) {
 		const result = this.creep.upgradeController(controller);
@@ -408,38 +374,38 @@ export class Zerg {
 		return result;
 	}
 
-	transfer(target: Creep | Zerg | Structure, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
-		let result: ScreepsReturnCode;
-		if (target instanceof Zerg) {
-			result = this.creep.transfer(target.creep, resourceType, amount);
-		} else {
-			result = this.creep.transfer(target, resourceType, amount);
-		}
-		if (!this.actionLog.transfer) this.actionLog.transfer = (result == OK);
-		return result;
-	}
+	// transfer(target: Creep | Zerg | Structure, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
+	// 	let result: ScreepsReturnCode;
+	// 	if (target instanceof Zerg) {
+	// 		result = this.creep.transfer(target.creep, resourceType, amount);
+	// 	} else {
+	// 		result = this.creep.transfer(target, resourceType, amount);
+	// 	}
+	// 	if (!this.actionLog.transfer) this.actionLog.transfer = (result == OK);
+	// 	return result;
+	// }
 
-	goTransfer(target: Creep | Zerg | Structure, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
-		if (this.pos.inRangeToPos(target.pos, RANGES.TRANSFER)) {
-			return this.transfer(target, resourceType, amount);
-		} else {
-			return this.goTo(target);
-		}
-	}
+	// goTransfer(target: Creep | Zerg | Structure, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
+	// 	if (this.pos.inRangeToPos(target.pos, RANGES.TRANSFER)) {
+	// 		return this.transfer(target, resourceType, amount);
+	// 	} else {
+	// 		return this.goTo(target);
+	// 	}
+	// }
 
-	withdraw(target: Structure | Tombstone | Ruin, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
-		const result = this.creep.withdraw(target, resourceType, amount);
-		if (!this.actionLog.withdraw) this.actionLog.withdraw = (result == OK);
-		return result;
-	}
+	// withdraw(target: Structure | Tombstone | Ruin, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
+	// 	const result = this.creep.withdraw(target, resourceType, amount);
+	// 	if (!this.actionLog.withdraw) this.actionLog.withdraw = (result == OK);
+	// 	return result;
+	// }
 
-	goWithdraw(target: Structure | Tombstone, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
-		if (this.pos.inRangeToPos(target.pos, RANGES.WITHDRAW)) {
-			return this.withdraw(target, resourceType, amount);
-		} else {
-			return this.goTo(target);
-		}
-	}
+	// goWithdraw(target: Structure | Tombstone, resourceType: ResourceConstant = RESOURCE_ENERGY, amount?: number) {
+	// 	if (this.pos.inRangeToPos(target.pos, RANGES.WITHDRAW)) {
+	// 		return this.withdraw(target, resourceType, amount);
+	// 	} else {
+	// 		return this.goTo(target);
+	// 	}
+	// }
 
 	// Simultaneous creep actions --------------------------------------------------------------------------------------
 
@@ -450,7 +416,7 @@ export class Zerg {
 	canExecute(actionName: string): boolean {
 		// Only one action can be executed from within a single pipeline
 		let conflictingActions: string[] = [actionName];
-		for (const pipeline of actionPipelines) {
+		for (const pipeline of ACTION_PIPELINES) {
 			if (pipeline.includes(actionName)) conflictingActions = conflictingActions.concat(pipeline);
 		}
 		for (const action of conflictingActions) {
@@ -467,7 +433,9 @@ export class Zerg {
 		return this.creep.getActiveBodyparts(type);
 	}
 
-	/* The same as creep.getActiveBodyparts, but just counts bodyparts regardless of condition. */
+	/**
+	 * The same as creep.getActiveBodyparts, but just counts bodyparts regardless of condition.
+	 */
 	getBodyparts(partType: BodyPartConstant): number {
 		return _.filter(this.body, (part: BodyPartDefinition) => part.type == partType).length;
 	}
@@ -476,45 +444,98 @@ export class Zerg {
 
 	// Carry methods
 
-	get hasMineralsInCarry(): boolean {
-		for (const resourceType in this.carry) {
-			if (resourceType != RESOURCE_ENERGY && (this.carry[<ResourceConstant>resourceType] || 0) > 0) {
-				return true;
-			}
-		}
-		return false;
-	}
+	// get hasMineralsInCarry(): boolean {
+	// 	for (const [resourceType, amount] of this.carry.contents) {
+	// 		if (resourceType != RESOURCE_ENERGY && amount > 0) {
+	// 			return true;
+	// 		}
+	// 	}
+	// 	return false;
+	// }
 
 	// Boosting logic --------------------------------------------------------------------------------------------------
 
-	get boosts(): _ResourceConstantSansEnergy[] {
-		return this.creep.boosts;
+	get boostCounts(): { [boostType: string]: number } {
+		return _.countBy(this.body, bodyPart => bodyPart.boost);
 	}
 
-	get boostCounts(): { [boostType: string]: number } {
-		return this.creep.boostCounts;
+	get bodypartCounts(): { [bodypart in BodyPartConstant]: number } {
+		return this.creep.bodypartCounts;
 	}
 
 	get needsBoosts(): boolean {
-		if (this.overlord) {
-			return this.overlord.shouldBoost(this);
+		if (!this.overlord) {
+			return false;
 		}
-		return false;
+		if ((this.ticksToLive || this.lifetime) < MIN_LIFETIME_FOR_BOOST * this.lifetime) {
+			return false;
+		}
+		return !_.isEmpty(this.getNeededBoosts());
+	}
+
+	/**
+	 * Gets an object describing the amount of boosts (in minerals, not bodyparts) this Zerg needs. If the zerg is
+	 * fully boosted for a given resource type, the entry is removed from memory.needBoosts.
+	 */
+	getNeededBoosts(): { [boostResource: string]: number } {
+		if (!this._neededBoosts) { // this is cleared each tick
+			if (this.memory.needBoosts && this.memory.needBoosts.length > 0) {
+
+				const neededBoosts: { [boostResource: string]: number } = {};
+
+				const boostCounts = this.boostCounts;
+				const bodyCounts = this.bodypartCounts;
+
+				for (const boost of _.cloneDeep(this.memory.needBoosts)) {
+					const bodypartType = BOOST_PARTS[boost];
+					if (!bodypartType) {
+						log.error(`${boost} is not a valid boost!`);
+					}
+					const numParts = bodyCounts[bodypartType] || 0;
+					const numBoostedParts = boostCounts[boost] || 0;
+					if (numBoostedParts < numParts) {
+						neededBoosts[boost] = LAB_BOOST_MINERAL * (numParts - numBoostedParts);
+					} else {
+						_.pull(this.memory.needBoosts, boost);
+					}
+				}
+
+				this._neededBoosts = neededBoosts;
+			} else {
+				this._neededBoosts = {};
+			}
+		}
+
+		return this._neededBoosts;
 	}
 
 	// Overlord logic --------------------------------------------------------------------------------------------------
 
-	get overlord(): Overlord | null {
-		return getOverlord(this);
-	}
+	// get overlord(): Overlord | null {
+	// 	return getOverlord(this);
+	// }
 
-	set overlord(newOverlord: Overlord | null) {
-		setOverlord(this, newOverlord);
+	// set overlord(newOverlord: Overlord | null) {
+	// 	setOverlord(this, newOverlord);
+	// }
+
+	// TODO add retire/reassignment logic
+	// Eg. creep get repurposed, it gets recycled, etc
+	/**
+	 * When a zerg has no more use for it's current overlord, it will be retired.
+	 * For now, that means RIP
+	 */
+	retire() {
+		this.say('💀 RIP 💀', true);
+		return this.suicide();
 	}
 
 	/* Reassigns the creep to work under a new overlord and as a new role. */
 	reassign(newOverlord: Overlord | null, newRole: string, invalidateTask = true) {
 		this.overlord = newOverlord;
+		if (newOverlord && newOverlord.colony && this.colony != newOverlord.colony) {
+			this.colony = newOverlord.colony;
+		}
 		this.roleName = newRole;
 		this.memory.role = newRole;
 		if (invalidateTask) {
@@ -588,150 +609,150 @@ export class Zerg {
 
 	// Colony association ----------------------------------------------------------------------------------------------
 
-	/**
-	 * Colony that the creep belongs to.
-	 */
-	get colony(): Colony | null {
-		if (this.memory[_MEM.COLONY] != null) {
-			return Overmind.colonies[this.memory[_MEM.COLONY] as string];
-		} else {
-			return null;
-		}
-	}
-
-	set colony(newColony: Colony | null) {
-		if (newColony != null) {
-			this.memory[_MEM.COLONY] = newColony.name;
-		} else {
-			this.memory[_MEM.COLONY] = null;
-		}
-	}
-
-	/**
-	 * If the creep is in a colony room or outpost
-	 */
-	get inColonyRoom(): boolean {
-		return Overmind.colonyMap[this.room.name] == this.memory[_MEM.COLONY];
-	}
+	// /**
+	//  * Colony that the creep belongs to.
+	//  */
+	// get colony(): Colony | null {
+	// 	if (this.memory[MEM.COLONY] != null) {
+	// 		return Overmind.colonies[this.memory[MEM.COLONY] as string];
+	// 	} else {
+	// 		return null;
+	// 	}
+	// }
+	//
+	// set colony(newColony: Colony | null) {
+	// 	if (newColony != null) {
+	// 		this.memory[MEM.COLONY] = newColony.name;
+	// 	} else {
+	// 		this.memory[MEM.COLONY] = null;
+	// 	}
+	// }
+	//
+	// /**
+	//  * If the creep is in a colony room or outpost
+	//  */
+	// get inColonyRoom(): boolean {
+	// 	return Overmind.colonyMap[this.room.name] == this.memory[MEM.COLONY];
+	// }
 
 	// Movement and location -------------------------------------------------------------------------------------------
 
-	goTo(destination: RoomPosition | HasPos, options: MoveOptions = {}) {
-		return Movement.goTo(this, destination, options);
-	}
-
-	goToRoom(roomName: string, options: MoveOptions = {}) {
-		return Movement.goToRoom(this, roomName, options);
-	}
-
-	inSameRoomAs(target: HasPos): boolean {
-		return this.pos.roomName == target.pos.roomName;
-	}
-
-	safelyInRoom(roomName: string): boolean {
-		return this.room.name == roomName && !this.pos.isEdge;
-	}
-
-	get inRampart(): boolean {
-		return this.creep.inRampart;
-	}
-
-	get isMoving(): boolean {
-		const moveData = this.memory._go as MoveData | undefined;
-		return !!moveData && !!moveData.path && moveData.path.length > 1;
-	}
-
-	/**
-	 * Kite around hostiles in the room
-	 */
-	kite(avoidGoals: (RoomPosition | HasPos)[] = this.room.hostiles, options: MoveOptions = {}): number | undefined {
-		_.defaults(options, {
-			fleeRange: 5
-		});
-		return Movement.kite(this, avoidGoals, options);
-	}
-
-	private defaultFleeGoals() {
-		let fleeGoals: (RoomPosition | HasPos)[] = [];
-		fleeGoals = fleeGoals.concat(this.room.hostiles)
-							 .concat(_.filter(this.room.keeperLairs, lair => (lair.ticksToSpawn || Infinity) < 10));
-		return fleeGoals;
-	}
-
-	/**
-	 * Flee from hostiles in the room, while not repathing every tick
-	 */
-	flee(avoidGoals: (RoomPosition | HasPos)[] = this.room.fleeDefaults,
-		 fleeOptions: FleeOptions              = {},
-		 moveOptions: MoveOptions              = {}): boolean {
-		if (avoidGoals.length == 0) {
-			return false;
-		} else if (this.room.controller && this.room.controller.my && this.room.controller.safeMode) {
-			return false;
-		} else {
-			const fleeing = Movement.flee(this, avoidGoals, fleeOptions.dropEnergy, moveOptions) != undefined;
-			if (fleeing) {
-				// Drop energy if needed
-				if (fleeOptions.dropEnergy && this.carry.energy > 0) {
-					const nearbyContainers = this.pos.findInRange(this.room.storageUnits, 1);
-					if (nearbyContainers.length > 0) {
-						this.transfer(_.first(nearbyContainers), RESOURCE_ENERGY);
-					} else {
-						this.drop(RESOURCE_ENERGY);
-					}
-				}
-				// Invalidate task
-				if (fleeOptions.invalidateTask) {
-					this.task = null;
-				}
-			}
-			return fleeing;
-		}
-	}
-
-	/**
-	 * Park the creep off-roads
-	 */
-	park(pos: RoomPosition = this.pos, maintainDistance = false): number {
-		return Movement.park(this, pos, maintainDistance);
-	}
-
-	/**
-	 * Moves a creep off of the current tile to the first available neighbor
-	 */
-	moveOffCurrentPos(): number | undefined {
-		return Movement.moveOffCurrentPos(this);
-	}
-
-	/**
-	 * Moves onto an exit tile
-	 */
-	moveOnExit(): ScreepsReturnCode | undefined {
-		return Movement.moveOnExit(this);
-	}
-
-	/**
-	 * Moves off of an exit tile
-	 */
-	moveOffExit(avoidSwamp = true): ScreepsReturnCode {
-		return Movement.moveOffExit(this, avoidSwamp);
-	}
-
-	moveOffExitToward(pos: RoomPosition, detour = true): number | undefined {
-		return Movement.moveOffExitToward(this, pos, detour);
-	}
-
+	// goTo(destination: RoomPosition | HasPos, options: MoveOptions = {}) {
+	// 	return Movement.goTo(this, destination, options);
+	// }
+	//
+	// goToRoom(roomName: string, options: MoveOptions = {}) {
+	// 	return Movement.goToRoom(this, roomName, options);
+	// }
+	//
+	// inSameRoomAs(target: HasPos): boolean {
+	// 	return this.pos.roomName == target.pos.roomName;
+	// }
+	//
+	// safelyInRoom(roomName: string): boolean {
+	// 	return this.room.name == roomName && !this.pos.isEdge;
+	// }
+	//
+	// get inRampart(): boolean {
+	// 	return this.creep.inRampart;
+	// }
+	//
+	// get isMoving(): boolean {
+	// 	const moveData = this.memory._go as MoveData | undefined;
+	// 	return !!moveData && !!moveData.path && moveData.path.length > 1;
+	// }
+	//
+	// /**
+	//  * Kite around hostiles in the room
+	//  */
+	// kite(avoidGoals: (RoomPosition | HasPos)[] = this.room.hostiles, options: MoveOptions = {}): number | undefined {
+	// 	_.defaults(options, {
+	// 		fleeRange: 5
+	// 	});
+	// 	return Movement.kite(this, avoidGoals, options);
+	// }
+	//
+	// private defaultFleeGoals() {
+	// 	let fleeGoals: (RoomPosition | HasPos)[] = [];
+	// 	fleeGoals = fleeGoals.concat(this.room.hostiles)
+	// 						 .concat(_.filter(this.room.keeperLairs, lair => (lair.ticksToSpawn || Infinity) < 10));
+	// 	return fleeGoals;
+	// }
+	//
+	// /**
+	//  * Flee from hostiles in the room, while not repathing every tick
+	//  */
+	// flee(avoidGoals: (RoomPosition | HasPos)[] = this.room.fleeDefaults,
+	// 	 fleeOptions: FleeOptions              = {},
+	// 	 moveOptions: MoveOptions              = {}): boolean {
+	// 	if (avoidGoals.length == 0 || this.room.dangerousHostiles.find(creep =>
+	// 																	   creep.pos.getRangeToXY(this.pos.x, this.pos.y) < 6) == undefined) {
+	// 		return false;
+	// 	} else if (this.room.controller && this.room.controller.my && this.room.controller.safeMode) {
+	// 		return false;
+	// 	} else {
+	// 		const fleeing = Movement.flee(this, avoidGoals, fleeOptions.dropEnergy, moveOptions) != undefined;
+	// 		if (fleeing) {
+	// 			// Drop energy if needed
+	// 			if (fleeOptions.dropEnergy && this.carry.energy > 0) {
+	// 				const nearbyContainers = this.pos.findInRange(this.room.storageUnits, 1);
+	// 				if (nearbyContainers.length > 0) {
+	// 					this.transfer(_.first(nearbyContainers), RESOURCE_ENERGY);
+	// 				} else {
+	// 					this.drop(RESOURCE_ENERGY);
+	// 				}
+	// 			}
+	// 			// Invalidate task
+	// 			if (fleeOptions.invalidateTask && !this.inRampart) {
+	// 				this.task = null;
+	// 			}
+	// 		}
+	// 		return fleeing;
+	// 	}
+	// }
+	//
+	// /**
+	//  * Park the creep off-roads
+	//  */
+	// park(pos: RoomPosition = this.pos, maintainDistance = false): number {
+	// 	return Movement.park(this, pos, maintainDistance);
+	// }
+	//
+	// /**
+	//  * Moves a creep off of the current tile to the first available neighbor
+	//  */
+	// moveOffCurrentPos(): number | undefined {
+	// 	return Movement.moveOffCurrentPos(this);
+	// }
+	//
+	// /**
+	//  * Moves onto an exit tile
+	//  */
+	// moveOnExit(): ScreepsReturnCode | undefined {
+	// 	return Movement.moveOnExit(this);
+	// }
+	//
+	// /**
+	//  * Moves off of an exit tile
+	//  */
+	// moveOffExit(avoidSwamp = true): ScreepsReturnCode {
+	// 	return Movement.moveOffExit(this, avoidSwamp);
+	// }
+	//
+	// moveOffExitToward(pos: RoomPosition, detour = true): number | undefined {
+	// 	return Movement.moveOffExitToward(this, pos, detour);
+	// }
 
 
 	// Miscellaneous fun stuff -----------------------------------------------------------------------------------------
 
-	sayLoop(messageList: string[], pub?: boolean) {
-		return this.say(messageList[Game.time % messageList.length], pub);
-	}
-
-	sayRandom(phrases: string[], pub?: boolean) {
-		return this.say(phrases[Math.floor(Math.random() * phrases.length)], pub);
-	}
+	// sayLoop(messageList: string[], pub?: boolean) {
+	// 	return this.say(messageList[Game.time % messageList.length], pub);
+	// }
+	//
+	// sayRandom(phrases: string[], pub?: boolean) {
+	// 	return this.say(phrases[Math.floor(Math.random() * phrases.length)], pub);
+	// }
 
 }
 

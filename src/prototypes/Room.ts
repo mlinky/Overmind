@@ -1,5 +1,6 @@
 // Room prototypes - commonly used room properties and methods
 
+import {isAlly} from '../utilities/utils';
 import {MY_USERNAME} from '../~settings';
 
 // Logging =============================================================================================================
@@ -18,6 +19,14 @@ Object.defineProperty(Room.prototype, 'my', {
 	},
 	configurable: true,
 });
+
+Object.defineProperty(Room.prototype, 'isColony', {
+	get() {
+		return Overmind.colonies[this.name] != undefined;
+	},
+	configurable: true,
+});
+
 
 Object.defineProperty(Room.prototype, 'isOutpost', {
 	get() {
@@ -65,9 +74,19 @@ Object.defineProperty(Room.prototype, 'creeps', {
 Object.defineProperty(Room.prototype, 'hostiles', {
 	get() {
 		if (!this._hostiles) {
-			this._hostiles = this.find(FIND_HOSTILE_CREEPS);
+			this._hostiles = this.find(FIND_HOSTILE_CREEPS, {filter: (creep: Creep) => !isAlly(creep.owner.username)});
 		}
 		return this._hostiles;
+	},
+	configurable: true,
+});
+
+Object.defineProperty(Room.prototype, 'friendlies', {
+	get() {
+		if (!this._friendlies) {
+			this._friendlies = this.find(FIND_HOSTILE_CREEPS, {filter: (creep: Creep) => isAlly(creep.owner.username)});
+		}
+		return this._friendlies;
 	},
 	configurable: true,
 });
@@ -95,9 +114,7 @@ Object.defineProperty(Room.prototype, 'sourceKeepers', {
 Object.defineProperty(Room.prototype, 'playerHostiles', {
 	get() {
 		if (!this._playerHostiles) {
-			this._playerHostiles = _.filter(this.hostiles,
-											(creep: Creep) => creep.owner.username != 'Invader'
-															  && creep.owner.username != 'Source Keeper');
+			this._playerHostiles = _.filter(this.hostiles, (creep: Creep) => creep.isHuman);
 		}
 		return this._playerHostiles;
 	},
@@ -110,14 +127,12 @@ Object.defineProperty(Room.prototype, 'dangerousHostiles', {
 			if (this.my) {
 				this._dangerousHostiles = _.filter(this.hostiles,
 												   (creep: Creep) => creep.getActiveBodyparts(ATTACK) > 0
-																	 || creep.getActiveBodyparts(WORK) > 0
 																	 || creep.getActiveBodyparts(RANGED_ATTACK) > 0
-																	 || creep.getActiveBodyparts(HEAL) > 0);
+																	 || creep.getActiveBodyparts(WORK) > 0);
 			} else {
 				this._dangerousHostiles = _.filter(this.hostiles,
 												   (creep: Creep) => creep.getActiveBodyparts(ATTACK) > 0
-																	 || creep.getActiveBodyparts(RANGED_ATTACK) > 0
-																	 || creep.getActiveBodyparts(HEAL) > 0);
+																	 || creep.getActiveBodyparts(RANGED_ATTACK) > 0);
 			}
 		}
 		return this._dangerousHostiles;
@@ -128,11 +143,16 @@ Object.defineProperty(Room.prototype, 'dangerousHostiles', {
 Object.defineProperty(Room.prototype, 'dangerousPlayerHostiles', {
 	get() {
 		if (!this._dangerousPlayerHostiles) {
-			this._dangerousPlayerHostiles = _.filter(this.playerHostiles,
-													 (c: Creep) => c.getActiveBodyparts(ATTACK) > 0
-																   || c.getActiveBodyparts(WORK) > 0
-																   || c.getActiveBodyparts(RANGED_ATTACK) > 0
-																   || c.getActiveBodyparts(HEAL) > 0);
+			if (this.my) {
+				this._dangerousPlayerHostiles = _.filter(this.playerHostiles,
+												   (creep: Creep) => creep.getActiveBodyparts(ATTACK) > 0
+																	 || creep.getActiveBodyparts(RANGED_ATTACK) > 0
+																	 || creep.getActiveBodyparts(WORK) > 0);
+			} else {
+				this._dangerousPlayerHostiles = _.filter(this.playerHostiles,
+												   (creep: Creep) => creep.getActiveBodyparts(ATTACK) > 0
+																	 || creep.getActiveBodyparts(RANGED_ATTACK) > 0);
+			}
 		}
 		return this._dangerousPlayerHostiles;
 	},
@@ -142,12 +162,10 @@ Object.defineProperty(Room.prototype, 'dangerousPlayerHostiles', {
 Object.defineProperty(Room.prototype, 'fleeDefaults', {
 	get() {
 		if (!this._fleeDefaults) {
-			this._fleeDefaults = (<HasPos[]>[])
-				.concat(_.filter(this.hostiles,
-								 (c: Creep) => c.getActiveBodyparts(ATTACK) > 0
-											   || c.getActiveBodyparts(RANGED_ATTACK) > 0))
-				.concat(_.filter(this.keeperLairs,
-								 (l: StructureKeeperLair) => (l.ticksToSpawn || Infinity) <= 10));
+			this._fleeDefaults = [
+				...this.dangerousHostiles,
+				..._.filter(this.keeperLairs, (l: StructureKeeperLair) => (l.ticksToSpawn || Infinity) <= 10)
+			];
 		}
 		return this._fleeDefaults;
 	},
@@ -170,7 +188,9 @@ Object.defineProperty(Room.prototype, 'structures', {
 Object.defineProperty(Room.prototype, 'hostileStructures', {
 	get() {
 		if (!this._hostileStructures) {
-			this._hostileStructures = this.find(FIND_HOSTILE_STRUCTURES, {filter: (s: Structure) => s.hitsMax});
+			this._hostileStructures = this.find(FIND_HOSTILE_STRUCTURES, {
+				filter: (s: Structure) => (s.hitsMax) && !isAlly(_.get(s, ['owner', 'username']))
+			});
 		}
 		return this._hostileStructures;
 	},
@@ -202,12 +222,42 @@ Object.defineProperty(Room.prototype, 'constructionSites', {
 	configurable: true,
 });
 
+Object.defineProperty(Room.prototype, 'allConstructionSites', {
+	get() {
+		if (!this._allConstructionSites) {
+			this._allConstructionSites = this.find(FIND_CONSTRUCTION_SITES);
+		}
+		return this._allConstructionSites;
+	},
+	configurable: true,
+});
+
+Object.defineProperty(Room.prototype, 'hostileConstructionSites', {
+	get() {
+		if (!this._hostileConstructionSites) {
+			this._hostileConstructionSites = this.find(FIND_HOSTILE_CONSTRUCTION_SITES);
+		}
+		return this._hostileConstructionSites;
+	},
+	configurable: true,
+});
+
 Object.defineProperty(Room.prototype, 'tombstones', {
 	get() {
 		if (!this._tombstones) {
 			this._tombstones = this.find(FIND_TOMBSTONES);
 		}
 		return this._tombstones;
+	},
+	configurable: true,
+});
+
+Object.defineProperty(Room.prototype, 'ruins', {
+	get() {
+		if (!this._ruins) {
+			this._ruins = this.find(FIND_RUINS);
+		}
+		return this._ruins;
 	},
 	configurable: true,
 });

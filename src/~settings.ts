@@ -75,7 +75,7 @@ export const SHARD3_MAX_OWNED_ROOMS = 3;
  * Private servers: 1,000 (will spend aggressively)
  * Public servers: 100,000 if you are below RCL 10, otherwise 1,000,000.
  */
-export const RESERVE_CREDITS = onPublicServer() ? (Game.gcl.level >= 10 ? 1e6 : 1e5) : 1000;
+export const RESERVE_CREDITS = onPublicServer() ? (Game.gcl.level >= 10 ? 4e6 : 1e5) : 1000;
 
 /**
  * The global Overmind object will be re-instantiated after this many ticks. In the meantime, refresh() is used.
